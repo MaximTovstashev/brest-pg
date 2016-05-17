@@ -11,10 +11,13 @@ class Table {
     /**
      *
      * @param {DB} db
-     * @param table_name
+     * @param {String} table_name
+     * @param {String} [alias]
      */
-    constructor(db, table_name) {
+    constructor(db, table_name, alias) {
         this.name = table_name;
+        this.alias = alias || '';
+        this.aliasClause = alias ? `${alias}.` : '';
         this.columns = {};
         this.persistentUpdatesSuspended = 0;
         this.db = db;
@@ -68,7 +71,7 @@ class Table {
                         self.columns[constraint.column_name].is_primary = true;
                         constraint_found = true;
                         self.primary.push(constraint.column_name);
-                        self.defaultIds.push(util.format('%s.%s = %L', self.name, constraint.column_name));
+                        self.defaultIds.push(util.format('%s = %L', constraint.column_name));
                     }
                     if (constraint.constraint_type == KEY_FOREIGN) {
                         self.columns[constraint.column_name].is_foreign = true;
@@ -76,6 +79,7 @@ class Table {
                     }
                 });
                 if (!constraint_found) console.log(`[WARNING] No constraints on table ${self.name}`);
+                self.defaultIds = self.defaultIds.length ? ` AND ${self.defaultIds.join(' AND ')}` : '';
                 next();
             },
 
@@ -87,26 +91,29 @@ class Table {
                 //Set default filters for all table columns
                 var defaultFilters = {};
                 _.each(self.columns, function(props, column){
-                    defaultFilters[column] = {where: util.format(" AND %s.%s = %L", self.name, column)};
-                    defaultFilters[column+'s'] = {where: util.format(" AND %s.%s IN (%L)", self.name, column)};
-                    defaultFilters['not_'+column] = {where: util.format(" AND %s.%s <> %L", self.name, column)};
-                    defaultFilters['not_'+column+'s'] = {where: util.format(" AND %s.%s NOT IN (%L)", self.name, column)};
-                    defaultFilters['null_'+column] = {where: util.format(" AND IS NULL %s.%s", self.name, column)};
-                    defaultFilters['not_null_'+column] = {where: util.format(" AND IS NOT NULL %s.%s", self.name, column)};
+                    var columnDefinition = `${self.aliasClause}${column}`;
+                    defaultFilters[column] = {where: ` AND ${columnDefinition} = %L`};
+                    defaultFilters[`${column}s`] = {where: ` AND ${columnDefinition} IN (%L)`};
+                    defaultFilters[`not_${column}`] = {where: ` AND ${columnDefinition} <> %L`};
+                    defaultFilters[`not_${column}s`] = {where: ` AND ${columnDefinition} NOT IN (%L)`};
+                    defaultFilters[`null_${column}`] = {where: ` AND IS NULL ${columnDefinition}`};
+                    defaultFilters[`not_null_${column}`] = {where: ` AND IS NOT NULL ${columnDefinition}`};
                 });
 
                 //Use class filters (if any) with default filters fallback
                 self.filters = _.defaults(self.filters || {}, defaultFilters);
 
+                var aliasDefinition = self.alias ? ` AS ${self.alias}` : '';
+
                 //If the queries are already defined in model class, we use them instead of default queries
                 self.queries = _.defaults(self.queries || {}, {
-                    row: `SELECT {{columns}}{{select}} FROM ${self.name}{{join}} WHERE {{whereClause}} {{where}} {{group}} {{having}} {{order}} LIMIT 1`,
-                    list: `SELECT {{columns}}{{select}} FROM ${self.name}{{join}} WHERE 1{{where}} {{group}} {{having}} {{order}} {{limit}}`,
-                    insert: `INSERT INTO ${self.name} ({{columns}}) VALUES ({{values}}){{duplicate}}`,
-                    update: `UPDATE ${self.name} SET {{columns}} WHERE ${self.defaultIds}`,
-                    del: `DELETE FROM ${self.name} WHERE ${self.defaultIds}`,
-                    delWhere: `DELETE FROM ${self.name} WHERE 1 {{where}}`,
-                    count: `SELECT COUNT(*) as cnt FROM ${self.name} WHERE 1 {{where}}`
+                    row: `SELECT *{{select}} FROM "${self.name}"${aliasDefinition}{{join}} WHERE true{{whereClause}} {{where}} {{group}} {{having}} {{order}} LIMIT 1`,
+                    list: `SELECT *{{select}} FROM "${self.name}"${aliasDefinition}{{join}} WHERE true{{where}} {{group}} {{having}} {{order}} {{limit}}`,
+                    insert: `INSERT INTO "${self.name}"${aliasDefinition} ({{columns}}) VALUES ({{values}}){{returning}}`,
+                    update: `UPDATE "${self.name}"${aliasDefinition} SET {{columns}} WHERE true ${self.defaultIds}`,
+                    del: `DELETE FROM "${self.name}"${aliasDefinition} WHERE true ${self.defaultIds}`,
+                    delWhere: `DELETE FROM "${self.name}"${aliasDefinition} WHERE true {{where}}`,
+                    count: `SELECT COUNT(*) as cnt FROM "${self.name}" WHERE true {{where}}`
                 });
 
                 self.persistentAssoc = self.persistentAssoc || {};
@@ -122,7 +129,7 @@ class Table {
      */
     suspendPersistentUpdates() {
         this.persistentUpdatesSuspended++;
-        console.log("Persistent lock for table '" + self.name + "' is set to " + self.persistentUpdatesSuspended);
+        console.log("Persistent lock for table '" + this.name + "' is set to " + this.persistentUpdatesSuspended);
     };
 
     /**
@@ -154,7 +161,7 @@ class Table {
      */
     updatePersistent(callback){
         var self = this;
-        if ((self.persistent || self.persistentAssoc)  && self.persistentUpdatesSuspended == 0) {
+        if ((!_.isEmpty(self.persistent) || !_.isEmpty(self.persistentAssoc)) && self.persistentUpdatesSuspended == 0) {
             self.suspendPersistentUpdates();
             async.waterfall([
                 function(callback) {
@@ -208,7 +215,7 @@ class Table {
      * @param filters
      * @returns {*}
      */
-    injectSort(sql, filters){
+    static injectSort(sql, filters){
         if (filters['order']) {
             var sort = filters['order'].split(',');
             if (_.isArray(sort)){
@@ -231,7 +238,7 @@ class Table {
      * @param sql
      * @param filters
      */
-    injectLimit(sql, filters){
+    static injectLimit(sql, filters){
         if (filters['limit']) {
             var limit = filters['limit'].split(',');
             if (_.isArray(limit)){
@@ -245,9 +252,22 @@ class Table {
     };
 
     /**
+     * Inject RETURNING statement into request if it's required
+     * @param {String} sql
+     * @returns {string}
+     */
+    injectReturning(sql) {
+        var returning = '';
+        if (this.primary && this.primary.length) {
+            returning = ' RETURNING ' + this.primary.join(', ');
+        }
+        return sql.replace('{{returning}}', returning);
+    }
+
+    /**
      * Select one row as an object
      * @param {int|String|Object} ids
-     * @param {Object} filters
+     * @param {Object} [filters]
      * @param {Function} callback
      */
     row(ids, filters, callback){
@@ -260,28 +280,30 @@ class Table {
 
         var whereClause = "";
         if (!_.isObject(ids)) {
-            var params = {};
-            params[self.primary[0]] = ids;
-            ids = params;
-            whereClause = self.defaultIds;
+            whereClause = ` AND ${self.primary[0]} = %L`;
         } else {
             var fields = [];
-            _.each(ids, function(){
-                fields.push("%L")
+            var values = _.values(ids);
+            _.each(ids, function(value, key){
+                fields.push(`${key} = %L`);
             });
+            ids = values;
             whereClause = fields.join(" AND ");
         }
 
         var columns = [];
         _.each(self.columns, function(column, name){
-            columns.push(`${self.name}.${name}`);
+            columns.push(`${name}`);
         });
         var sql = self.queries.row
-            .replace('{{columns}}', columns.join(', '))
             .replace('{{whereClause}}', whereClause);
 
         sql = self.db.injectFilters(sql, filters, self.filters);
-        self.db.row(sql, ids, callback);
+        self.db.row(sql, ids, function(err, row){
+            if (err) return callback(err);
+            if (_.isEmpty(row)) return callback({error: `Entry not found in "${self.name}" table for identifier(s) ${ids}`, code: 404});
+            callback(null, row);
+        });
     };
 
     /**
@@ -290,6 +312,7 @@ class Table {
      * @param {Function} callback
      */
     list(filters, callback) {
+        var self = this;
         if (_.isFunction(filters)) {
             callback = filters;
             filters = {};
@@ -308,8 +331,8 @@ class Table {
         });
 
         var sql = self.queries.list.replace('{{columns}}', columns.join(', '));
-        sql = self.injectLimit(sql, filters);
-        sql = self.injectSort(sql, filters);
+        sql = Table.injectLimit(sql, filters);
+        sql = Table.injectSort(sql, filters);
         sql = self.db.injectFilters(sql, filters, self.filters);
         return self.db.query(sql, callback);
     };
@@ -318,11 +341,12 @@ class Table {
     /**
      * Insert
      * @param {Object} data
-     * @param {Object} options
+     * @param {Object} [options]
      * @param {Function} callback
      */
     insert(data, options, callback) {
         var self = this;
+
         if (_.isFunction(options)) {
             callback = options;
             options = {};
@@ -334,13 +358,14 @@ class Table {
 
         var sql = self.queries.insert
             .replace('{{columns}}', '%I')
-            .replace('{{values}}', '%L')
-            .replace('{{duplicate}}', duplicate);
+            .replace('{{values}}', '%L');
 
-        var q = self.db.query(sql, [_.keys(insert_data), _.values(insert_data)], function(err, res){
+        sql = self.injectReturning(sql);
+
+        var q = self.db.row(sql, [_.keys(insert_data), _.values(insert_data)], function(err, res){
             if (err) callback(err);
             else {
-                callback(null, {'id':  res.insertId});
+                callback(null, res);
                 self.updatePersistent(function(err){
                     if (err) console.log('\nERROR: persistent fields update failed for ', self.name, 'with error:\n'+err);
                 });
@@ -356,28 +381,23 @@ class Table {
      */
     update(data, options, callback) {
         var self = this;
-        var values = {};
         var valuesStr = [];
 
         if (_.isFunction(options)) {
             callback = options;
             options = {};
         }
-        _.each(data, function(value, column){
-            if (self.columns[column] && !self.primary[column]) {
-                values[column] = data[column];
-            }
-        });
 
-        _.each(values, function(value, column){
+        var update_data = _.pick(data, _.difference(_.keys(self.columns), self.primary));
+        var where_data = _.values(_.pick(data, self.primary));
+        
+        _.each(update_data, function(value, column){
             valuesStr.push(format('%I = %L', column, value));
         });
 
-        valuesStr = valuesStr.join(', ');
+        var sql = self.queries.update.replace('{{columns}}', valuesStr.join(', '));
 
-        var sql = self.queries.update.replace('{{columns}}', valuesStr);
-
-        return self.db.query(sql, function(err){
+        return self.db.query(sql, where_data, function(err){
             if (err) callback(err);
             else {
                 callback(null, {update: 'success'});
@@ -399,26 +419,24 @@ class Table {
         var queryIds = [];
         if (!_.isObject(ids)) {
             if (self.primary.length == 1) {
-                var id = {};
-                id[self.primary[0]] = ids;
-                queryIds = id;
+                queryIds = ids;
             } else callback({Error: "Incorrect delete id"});
         } else {
             var whereReplace = '';
             _.each(ids, function(value, column){
-                whereReplace += ' AND ' + column + ' = %L';
+                whereReplace += ' AND ' + column + (_.isArray(value) ? ' IN (%L)' : ' = %L');
                 queryIds.push(value);
             });
             sql = self.queries.delWhere.replace('{{where}}', whereReplace);
         }
-        return self.db.query(sql, queryIds, function(err){
-            if (err) callback(err);
-            else {
-                callback(null, {delete: 'success'});
-                self.updatePersistent(function(err){
-                    if (err) console.log('\nERROR: persistent fields update failed for ', self.name, 'with error:\n'+err);
-                });
-            }
+        return self.db.query(sql, queryIds, function(err, res){
+            if (err) return callback(err);
+
+            callback(null, {delete: 'success'});
+            self.updatePersistent(function(err){
+                if (err) console.log('\nERROR: persistent fields update failed for ', self.name, 'with error:\n'+err);
+            });
+
         });
     };
 
@@ -440,7 +458,7 @@ class Table {
     };
 
     /**
-     * Returns true if quer
+     * Returns true if query
      *
      * @param filters
      * @param callback
@@ -450,31 +468,6 @@ class Table {
             callback(err, count > 0);
         });
     };
-
-    /**
-     * Shortcut for sql query to use in extended models
-     *
-     * @param {String} sql
-     * @param {Object} params
-     * @param {Function} callback
-     * @returns {Object} Postgres query object*
-     */
-    query(sql, params, callback) {
-        return this.db.query(sql, params, callback);
-    };
-
-    /**
-     *  Shortcut for sql row query to use in extended models
-     *
-     * @param {String} sql
-     * @param {Object} params
-     * @param {Function} callback
-     * @returns {Object} MariaDB query object
-     */
-    queryRow(sql, params, callback) {
-        return this.db.queryRow(sql, params, callback)
-    };
-
 }
 
 module.exports = Table;
