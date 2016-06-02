@@ -288,7 +288,9 @@ class Table {
                 fields.push(`${key} = %L`);
             });
             ids = values;
-            whereClause = fields.join(" AND ");
+            whereClause = fields.map(function(_item) {
+                return " AND " + _item;
+            }).join(" ");
         }
 
         var columns = [];
