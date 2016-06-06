@@ -38,6 +38,10 @@ BrestPG.init = function(brest, callback) {
     );
 };
 
+BrestPG.tbl = function(table_name) {
+    return BrestPG.db.tables[table_name];
+};
+
 BrestPG.ctrl = function(table_name) {
     return BrestPG.controllers.get(table_name);
 };

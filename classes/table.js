@@ -1,6 +1,5 @@
 var async = require('async'),
     format = require('pg-format'),
-    util = require('util'),
     _ = require('lodash');
 
 const KEY_PRIMARY = 'PRIMARY KEY';
@@ -19,12 +18,13 @@ class Table {
         this.alias = alias || '';
         this.aliasClause = alias ? `${alias}.` : '';
         this.columns = {};
+        this.p = {};
         this.persistentUpdatesSuspended = 0;
         this.db = db;
     }
 
     init(callback) {
-        var self = this;
+        let self = this;
         async.waterfall([
             /**
              * Request columns info
@@ -71,7 +71,7 @@ class Table {
                         self.columns[constraint.column_name].is_primary = true;
                         constraint_found = true;
                         self.primary.push(constraint.column_name);
-                        self.defaultIds.push(util.format('%s = %L', constraint.column_name));
+                        self.defaultIds.push(`${constraint.column_name} = %L`);
                     }
                     if (constraint.constraint_type == KEY_FOREIGN) {
                         self.columns[constraint.column_name].is_foreign = true;
@@ -138,7 +138,7 @@ class Table {
      * @param preventUpdating
      */
     resumePersistentUpdates(callback, preventUpdating) {
-        var self = this;
+        let self = this;
         self.persistentUpdatesSuspended = Math.max(self.persistentUpdatesSuspended - 1, 0);
         console.log("Persistent lock for table '" + self.name + "' is set to " + self.persistentUpdatesSuspended);
         if (self.persistentUpdatesSuspended == 0 && !preventUpdating) {
@@ -164,22 +164,23 @@ class Table {
         if ((!_.isEmpty(self.persistent) || !_.isEmpty(self.persistentAssoc)) && self.persistentUpdatesSuspended == 0) {
             self.suspendPersistentUpdates();
             async.waterfall([
-                function(callback) {
+                function(next) {
                     if (self.persistent) {
-                        async.forEachOf(self.persistent, function (persistent, key, callback) {
+                        async.forEachOf(self.persistent, function (persistent, key, next_persistent) {
                             if (_.isFunction(persistent)) {
-                                persistent(function (err, data) {
+                                const func = persistent.bind(self);
+                                func(function (err, data) {
                                     self.p[key] = data || false;
-                                    callback(err);
+                                    next_persistent(err);
                                 });
                             } else {
-                                console.log('Attempted to build persistent', key, 'with', persistent);
-                                callback({error: 'Persistent update function is not a function'});
+                                console.log(`Attempted to build persistent ${key} with non-function ${persistent}: `, self[persistent]);
+                                next_persistent({error: `Persistent update function for ${key} is not a function`});
                             }
-                        }, callback)
-                    } else callback();
+                        }, next)
+                    } else next();
                 },
-                function(callback) {
+                function(next) {
                     if (self.persistentAssoc) {
                         async.forEachOf(self.persistentAssoc, function (id_field, key, callback) {
                             self.list(function (err, list_elements) {
@@ -198,8 +199,8 @@ class Table {
                                     callback();
                                 }
                             });
-                        }, callback);
-                    } else callback();
+                        }, next);
+                    } else next();
                 }
             ], function(err){
                 self.resumePersistentUpdates(null, true);
@@ -226,7 +227,7 @@ class Table {
                 }
                 if (sort.length) {
                     var fields = sort.join(", ");
-                    sql = sql.replace('{{order}}', util.format(" ORDER BY %s %s", fields, direction));
+                    sql = sql.replace('{{order}}', ` ORDER BY ${fields} ${direction}`);
                 }
             } else throw "Failed to parse order filter"
         }
@@ -245,7 +246,7 @@ class Table {
                 for (var i=0; i<limit.length; i++){
                     limit[i] = parseInt(limit[i]);
                 }
-                sql = sql.replace('{{limit}}', util.format(" LIMIT %s", limit.join(', ')))
+                sql = sql.replace('{{limit}}', ` LIMIT ${limit.join(', ')}`);
             } else throw "Failed to parse limit filter"
         }
         return sql;
@@ -280,17 +281,15 @@ class Table {
 
         var whereClause = "";
         if (!_.isObject(ids)) {
-            whereClause = ` AND ${self.primary[0]} = %L`;
+            whereClause = ` AND ${self.aliasClause}${self.primary[0]} = %L`;
         } else {
             var fields = [];
             var values = _.values(ids);
             _.each(ids, function(value, key){
-                fields.push(`${key} = %L`);
+                fields.push(` AND ${self.aliasClause}${key} = %L`);
             });
             ids = values;
-            whereClause = fields.map(function(_item) {
-                return " AND " + _item;
-            }).join(" ");
+            whereClause = fields.join(" ");
         }
 
         var columns = [];
