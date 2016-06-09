@@ -38,20 +38,22 @@ class Controller {
 
     /**
      * Default insert request
-     * @param data
-     * @param callback
+     * @param {Object} data
+     * @param {Object} [options]
+     * @param {Function} callback
      */
-    insert(data, callback) {
-        this.table.insert(data, callback);
+    insert(data, options, callback) {
+        this.table.insert(data, options, callback);
     }
 
     /**
      * Default update request
-     * @param data
-     * @param callback
+     * @param {Object} data
+     * @param {Object} [options]
+     * @param {Function} callback
      */
-    update(data, callback) {
-        this.table.update(data, callback);
+    update(data, options, callback) {
+        this.table.update(data, options, callback);
     }
 
     /**
@@ -62,6 +64,26 @@ class Controller {
     del(ids, callback) {
         this.table.del(ids, callback);
     }
+
+
+    /**
+     * Return the number of records matching the request. Count all records by default
+     * @param filters
+     * @param callback
+     */
+    count(filters, callback) {
+        this.table.count(filters, callback);
+    };
+
+    /**
+     * Returns true if query
+     *
+     * @param filters
+     * @param callback
+     */
+    exists(filters, callback) {
+        this.table.exists(filters, callback);
+    };
 
 }
 
