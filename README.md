@@ -43,8 +43,14 @@ table objects and controllers for each table in the database.
 
 ## 3 Changelist
 
-### 0.0.1
-- First working version
+### 0.0.6
+
+- Default "exists" Controller method callback now returns homogeneous reply: {exists: true|false, ...(filter fields)}
+
+### 0.0.5
+- Fixed issue with count & exists methods not working
+- Added default crud options to Table
+- Added Transform middleware to Table
 
 ### 0.0.2
 - BrestPG.tbl(table_name) now returns Table instances for given tables
@@ -52,7 +58,5 @@ table objects and controllers for each table in the database.
 - Fixed issue with row request  building incorrect query when receiving
  an object as parameter
 
-### 0.0.5
-- Fixed issue with count & exists methods not working
-- Added default crud options to Table
-- Added Transform middleware to Table
+### 0.0.1
+- First working version

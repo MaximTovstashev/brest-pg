@@ -1,3 +1,5 @@
+const _ = require('lodash');
+
 class Controller {
 
     get name() {
@@ -82,7 +84,10 @@ class Controller {
      * @param callback
      */
     exists(filters, callback) {
-        this.table.exists(filters, callback);
+        this.table.exists(filters, function(err, exists){
+            if (err) return callback(err);
+            callback(null, _.defaults(filters, {exists: exists}));
+        });
     };
 
 }
