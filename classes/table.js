@@ -491,7 +491,7 @@ class Table {
      */
     _transform(data, options) {
         if (_.isUndefined(options.transform) || !_.isArray(options.transform) || options.transform.length == 0) {
-            return;
+            return data;
         }
         _.each(options.transform, function(_t) {
             _.each(_t.fields, function(_k) {

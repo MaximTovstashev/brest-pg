@@ -43,6 +43,10 @@ table objects and controllers for each table in the database.
 
 ## 3 Changelist
 
+### 0.0.6-1
+
+- Fixed bug with empty Transform middleware
+
 ### 0.0.6
 
 - Default "exists" Controller method callback now returns homogeneous reply: {exists: true|false, ...(filter fields)}
