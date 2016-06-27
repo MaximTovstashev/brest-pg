@@ -63,6 +63,10 @@ with column name it still has to be passed as a second parameter.
 - Fixed issue with update, broken by preprocessing call
 - Fixed issue with JOIN in SELECT causing incorrect ids
 
+### 0.0.6-1
+
+- Fixed bug with empty Transform middleware
+
 ### 0.0.6
 
 - Default "exists" Controller method callback now returns homogeneous reply: {exists: true|false, ...(filter fields)}
