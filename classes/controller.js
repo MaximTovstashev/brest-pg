@@ -1,5 +1,7 @@
 const _ = require('lodash');
 
+const httpStatus = require('../lib/http_status_codes');
+
 class Controller {
 
     get name() {
@@ -13,10 +15,6 @@ class Controller {
     constructor(table) {
         this.table = table;
         this.ctrl = require('../index').controllers;
-    }
-
-    check() {
-        return `Check ${this.name}`;
     }
 
     /**
@@ -84,11 +82,22 @@ class Controller {
      * @param callback
      */
     exists(filters, callback) {
+        if (_.isEmpty(filters)) return callback({error: `Empty request for ${this.name} entry existance check`, code: httpStatus.UNPROCESSABLE_ENTITY});
         this.table.exists(filters, function(err, exists){
             if (err) return callback(err);
             callback(null, _.defaults(filters, {exists: exists}));
         });
     };
+
+    /**
+     * Wrapper for Table::defaultFilters
+     * @param {Object} filters
+     * @param {String[]} exclude
+     * @returns {Object}
+     */
+    defaultFilters(filters, exclude) {
+        return this.table.defaultFilters(filters, exclude);
+    }
 
 }
 

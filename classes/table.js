@@ -1,9 +1,11 @@
-var async = require('async'),
+const async = require('async'),
     format = require('pg-format'),
     _ = require('lodash');
 
 const KEY_PRIMARY = 'PRIMARY KEY';
 const KEY_FOREIGN = 'FOREIGN KEY';
+
+const httpStatus = require('../lib/http_status_codes');
 
 class Table {
 
@@ -18,10 +20,18 @@ class Table {
         this.alias = alias || '';
         this.aliasClause = alias ? `${alias}.` : '';
         this.columns = {};
+        this.primary = [];
+        this.defaultIds = [];
         this.p = {};
         this.persistentUpdatesSuspended = 0;
         this.db = db;
-        this.default_crud_options = {};
+        this.transform = {};
+
+        this.PERSISTENT_MODE_SIMPLE = 'persistent_simple';
+        this.PERSISTENT_MODE_ASSOC = 'persistent_assoc';
+        this.PERSISTENT_MODE_ARRAY_BUNDLE = 'persistent_array';
+        this.PERSISTENT_MODE_ARRAY_KEY = 'persistent_key';
+        // this.PERSISTENT_MODE_TREE = 'persistent_tree';  TODO later
     }
 
     init(callback) {
@@ -44,7 +54,6 @@ class Table {
              * @param next
              */
             function(columns, next) {
-                self.columns = {};
                 _.each(columns, function(column) {
                     self.columns[column.column_name] = { name: column.column_name }
                 });
@@ -67,8 +76,6 @@ class Table {
              */
             function(constraints, next) {
                 var constraint_found = false;
-                self.primary = [];
-                self.defaultIds = [];
                 _.each(constraints, function(constraint) {
                     if (constraint.constraint_type == KEY_PRIMARY) {
                         self.columns[constraint.column_name].is_primary = true;
@@ -93,25 +100,44 @@ class Table {
             function(next) {
                 //Set default filters for all table columns
                 var defaultFilters = {};
+                var defaultFiltersAPI = {};
                 _.each(self.columns, function(props, column) {
                     var columnDefinition = `${self.aliasClause}${column}`;
                     defaultFilters[column] = { where: ` AND ${columnDefinition} = %L` };
                     defaultFilters[`${column}s`] = { where: ` AND ${columnDefinition} IN (%L)` };
                     defaultFilters[`not_${column}`] = { where: ` AND ${columnDefinition} <> %L` };
                     defaultFilters[`not_${column}s`] = { where: ` AND ${columnDefinition} NOT IN (%L)` };
-                    defaultFilters[`null_${column}`] = { where: ` AND IS NULL ${columnDefinition}` };
-                    defaultFilters[`not_null_${column}`] = { where: ` AND IS NOT NULL ${columnDefinition}` };
+                    defaultFilters[`null_${column}`] = { where: ` AND ${columnDefinition} IS NULL`};
+                    defaultFilters[`not_null_${column}`] = { where: ` AND ${columnDefinition} IS NOT NULL` };
+
+                    defaultFiltersAPI[column] = `Filter by ${column} equal to filter value`;
+                    defaultFiltersAPI[`${column}s`] = {
+                        description: `Filter by several values of ${column}`,
+                        toArray: true
+                    };
+                    defaultFiltersAPI[`not_${column}`] = `Filter by ${column} not equal to filter value`;
+                    defaultFiltersAPI[`not_${column}s`] = {
+                        description: `Reject filter results by several ${column} values`,
+                        toArray: true
+                    };
+                    defaultFiltersAPI[`null_${column}`] = `Filter by NULL ${column} entries`;
+                    defaultFiltersAPI[`not_null_${column}`] = `Filter by not NULL ${column} entries`;
+                });
+
+                _.each(self.filters, function(filter, filter_key){
+                    defaultFiltersAPI[filter_key] = filter.description || `Custom ${filter_key} filter`;
                 });
 
                 //Use class filters (if any) with default filters fallback
-                self.filters = _.defaults(self.filters || {}, defaultFilters);
+                self.filters = _.defaults(self.filters, defaultFilters);
+                self.filtersAPI = defaultFiltersAPI;
 
                 var aliasDefinition = self.alias ? ` AS ${self.alias}` : '';
 
                 //If the queries are already defined in model class, we use them instead of default queries
-                self.queries = _.defaults(self.queries || {}, {
-                    row: `SELECT *{{select}} FROM "${self.name}"${aliasDefinition}{{join}} WHERE true{{whereClause}} {{where}} {{group}} {{having}} {{order}} LIMIT 1`,
-                    list: `SELECT *{{select}} FROM "${self.name}"${aliasDefinition}{{join}} WHERE true{{where}} {{group}} {{having}} {{order}} {{limit}}`,
+                self.queries = _.defaults(self.queries, {
+                    row: `SELECT ${self.aliasClause}*{{select}} FROM "${self.name}"${aliasDefinition}{{join}} WHERE true{{whereClause}} {{where}} {{group}} {{having}} {{order}} LIMIT 1`,
+                    list: `SELECT ${self.aliasClause}*{{select}} FROM "${self.name}"${aliasDefinition}{{join}} WHERE true{{where}} {{group}} {{having}} {{order}} {{limit}}`,
                     insert: `INSERT INTO "${self.name}"${aliasDefinition} ({{columns}}) VALUES ({{values}}){{returning}}`,
                     update: `UPDATE "${self.name}"${aliasDefinition} SET {{columns}} WHERE true ${self.defaultIds}`,
                     del: `DELETE FROM "${self.name}"${aliasDefinition} WHERE true ${self.defaultIds}`,
@@ -125,6 +151,23 @@ class Table {
             }
         ], callback);
 
+    };
+
+    /**
+     * Extend API object with default filters
+     * @param {Object} filters Custom filters
+     * @param {String[]} exclude list of columns for which default filters should not be applied
+     * @return {Object}
+     */
+    defaultFilters(filters, exclude = []) {
+        let self = this;
+        let excludeFilters = [];
+        _.each(exclude, function(excludeColumn){
+            excludeFilters = _.concat(excludeFilters,
+                    [excludeColumn, `${excludeColumn}s`, `not_${excludeColumn}`,
+                    `not_${excludeColumn}s`, `null_${excludeColumn}`, `not_null_${excludeColumn}`]);
+        });
+        return _.defaultsDeep(filters, _.omit(self.filtersAPI, excludeFilters));
     };
 
     /**
@@ -174,35 +217,113 @@ class Table {
                                 const func = persistent.bind(self);
                                 func(function(err, data) {
                                     self.p[key] = data || false;
-                                    next_persistent(err);
-                                });
-                            } else {
-                                console.log(`Attempted to build persistent ${key} with non-function ${persistent}: `, self[persistent]);
-                                next_persistent({ error: `Persistent update function for ${key} is not a function` });
-                            }
-                        }, next)
-                    } else next();
-                },
-                function(next) {
-                    if (self.persistentAssoc) {
-                        async.forEachOf(self.persistentAssoc, function(id_field, key, callback) {
-                            self.list(function(err, list_elements) {
-                                if (err) callback(err);
-                                else {
-                                    var assoc = {};
-                                    _.each(list_elements, function(list_element) {
-                                        assoc[list_element[id_field]] = list_element;
-                                    });
-                                    self.p[key] = assoc;
                                     self[key] = (function(key) {
                                         return function(id) {
                                             return self.p[key][id]
                                         };
                                     })(key);
-                                    callback();
+                                    next_persistent(err);
+                                });
+                            } else {
+                                if (_.isString(persistent)) {
+                                    persistent = {
+                                        'mode': self.PERSISTENT_MODE_ASSOC,
+                                        'collect_by': persistent
+                                    }
                                 }
-                            });
-                        }, next);
+                                if (_.isObject(persistent)) {
+
+                                    if (!_.isString(persistent.mode)) {
+                                        console.log(`Incorrect persistent description for ${self.name}: ${key} (mode is missing or not a string):`);
+                                        return next_persistent({error: `Incorrect persistent description for ${self.name}: ${key} (mode is missing or not a string):`, persistent: persistent});
+                                    }
+
+                                    async.waterfall([
+                                        function(persistent_next_step) {
+                                            self.list(persistent.filters || {}, persistent_next_step);
+                                        },
+
+                                        function(rows, persistent_next_step) {
+                                            let pdata = {}; //persistent data
+                                            switch (persistent.mode) {
+                                                case self.PERSISTENT_MODE_SIMPLE:
+                                                    pdata = rows;
+                                                    break;
+                                                case self.PERSISTENT_MODE_ASSOC:
+                                                    if (!_.isString(persistent.collect_by)) {
+                                                        console.log(`Incorrect persistent description for ${self.name}: ${key} (collect_by field is missing or not a string):`);
+                                                        return persistent_next_step({error: `Incorrect persistent description for ${self.name}: ${key} (collect_by field is missing or not a string):`, persistent: persistent});
+                                                    }
+                                                    _.each(rows, function(row){
+                                                        if (_.isUndefined(row[persistent.collect_by])) {
+                                                            console.log(`WARNING: ${self.name}: ${key} has no entry for collect_by: ${persistent.collect_by}`);
+                                                        } else {
+                                                            pdata[row[persistent.collect_by]] = row;
+                                                        }
+                                                    });
+                                                    break;
+                                                case self.PERSISTENT_MODE_ARRAY_BUNDLE:
+                                                    if (!_.isString(persistent.collect_by)) {
+                                                        console.log(`Incorrect persistent description for ${self.name}: ${key} (collect_by field is missing or not a string):`);
+                                                        return persistent_next_step({error: `Incorrect persistent description for ${self.name}: ${key} (collect_by field is missing or not a string):`, persistent: persistent});
+                                                    }
+                                                    _.each(rows, function(row){
+                                                        if (_.isUndefined(row[persistent.collect_by])) {
+                                                            console.log(`WARNING: ${self.name}: ${key} has no entry for collect_by: ${persistent.collect_by}`);
+                                                        } else {
+                                                            if (_.isUndefined(pdata[row[persistent.collect_by]])) pdata[row[persistent.collect_by]] = [];
+                                                            pdata[row[persistent.collect_by]].push(row);
+                                                        }
+                                                    });
+                                                    break;
+                                                case self.PERSISTENT_MODE_ARRAY_KEY:
+                                                    if (!_.isString(persistent.collect_by)) {
+                                                        console.log(`Incorrect persistent description for ${self.name}: ${key} (collect_by field is missing or not a string):`);
+                                                        return persistent_next_step({error: `Incorrect persistent description for ${self.name}: ${key} (collect_by field is missing or not a string):`, persistent: persistent});
+                                                    }
+                                                    if (!_.isString(persistent.collect_from)) {
+                                                        console.log(`Incorrect persistent description for ${self.name}: ${key} (collect_from field is missing or not a string):`);
+                                                        return persistent_next_step({error: `Incorrect persistent description for ${self.name}: ${key} (collect_from field is missing or not a string):`, persistent: persistent});
+                                                    }
+                                                    _.each(rows, function(row){
+                                                        if (_.isUndefined(row[persistent.collect_by])) {
+                                                            console.log(`WARNING: ${self.name}: ${key} has no entry for collect_by: ${persistent.collect_by}`);
+                                                        } else {
+                                                            if (_.isUndefined(row[persistent.collect_from])) {
+                                                                console.log(`WARNING: ${self.name}: ${key} has no entry for collect_by: ${persistent.collect_from}`);
+                                                            } else {
+                                                                if (_.isUndefined(pdata[row[persistent.collect_by]])) pdata[row[persistent.collect_by]] = [];
+                                                                pdata[row[persistent.collect_by]].push(row[persistent.collect_from]);
+                                                            }
+                                                        }
+                                                    });
+                                                    break;
+                                                default:
+                                                console.log(`Incorrect persistent description for ${self.name}: ${key} (unknown mode: "${persistent.mode}"):`);
+                                                return persistent_next_step({error: `Incorrect persistent description for ${self.name}: ${key} (unknown mode: "${persistent.mode}"):`, persistent: persistent});
+                                            }
+
+                                            self.p[persistent.key || key] = pdata;
+                                            if (!persistent.no_function) {
+                                                self[persistent.getter_name || key] =
+                                                    _.isFunction(persistent.getter) ?  persistent.getter :
+                                                        (function (key) {
+                                                            return function (id) {
+                                                                return self.p[key][id]
+                                                            };
+                                                        })(key);
+                                            }
+
+                                            persistent_next_step();
+                                        }
+                                    ], next_persistent);
+
+                                } else {
+                                    console.log(`Incorrect persistent description for ${self.name}: ${key}:`, persistent);
+                                    next_persistent({error: `Incorrect persistent description for ${self.name}: ${key}:`, persistent: persistent});
+                                }
+                            }
+                        }, next)
                     } else next();
                 }
             ], function(err) {
@@ -289,7 +410,14 @@ class Table {
             var fields = [];
             var values = _.values(ids);
             _.each(ids, function(value, key) {
-                fields.push(` AND ${self.aliasClause}${key} = %L`);
+                if (self.columns[key]) {
+                    fields.push(` AND ${self.aliasClause}${key} = %L`);
+                } else {
+                    if (self.filters[key]) {
+                        filters[key] = value;
+                    }
+                }
+
             });
             ids = values;
             whereClause = fields.join(" ");
@@ -305,7 +433,7 @@ class Table {
         sql = self.db.injectFilters(sql, filters, self.filters);
         self.db.row(sql, ids, function(err, row) {
             if (err) return callback(err);
-            if (_.isEmpty(row)) return callback({ error: `Entry not found in "${self.name}" table for identifier(s) ${ids}`, code: 404 });
+            if (_.isEmpty(row)) return callback({error: `No ${self.name} found for identifier(s) ${ids}`, code: httpStatus.NOT_FOUND , ids: ids, filters: filters});
             callback(null, row);
         });
     };
@@ -321,7 +449,7 @@ class Table {
             callback = filters;
             filters = {};
         } else {
-            if (!_.isObject(filters)) {
+            if (!_.isObject(filters) && !_.isArray(filters)) {
                 console.log("WARNING. Invalid filters provided for " + self.name + ".list(). Object required");
                 console.log(filters);
                 filters = {};
@@ -357,7 +485,7 @@ class Table {
         }
 
         if (!options) options = {};
-        options = _.defaults(options, self.default_crud_options);
+        options = _.defaults(options, self.preprocess);
 
         var insert_data = _.pick(data, _.keys(self.columns));
 
@@ -369,7 +497,7 @@ class Table {
 
         sql = self.injectReturning(sql);
 
-        var q = self.db.row(sql, [_.keys(insert_data), _.values(insert_data)], function(err, res) {
+        return self.db.row(sql, [_.keys(insert_data), _.values(insert_data)], function(err, res) {
             if (err) callback(err);
             else {
                 callback(null, res);
@@ -396,7 +524,7 @@ class Table {
         }
 
         if (!options) options = {};
-        options = _.defaults(options, self.default_crud_options);
+        options = _.defaults(options, self.transform);
 
         var update_data = _.pick(data, _.difference(_.keys(self.columns), self.primary));
 
@@ -478,6 +606,7 @@ class Table {
      * @param callback
      */
     exists(filters, callback) {
+        if (_.isEmpty(filters)) return callback({error: `Empty request for ${this.name} entry existance check`, code: httpStatus.UNPROCESSABLE_ENTITY});
         this.count(filters, function(err, count) {
             callback(err, count > 0);
         });
@@ -491,12 +620,12 @@ class Table {
      */
     _transform(data, options) {
         if (_.isUndefined(options.transform) || !_.isArray(options.transform) || options.transform.length == 0) {
-            return;
+            return data;
         }
-        _.each(options.transform, function(_t) {
-            _.each(_t.fields, function(_k) {
-                if (!_.isUndefined(data[_k])) {
-                    data[_k] = _t.fn(data[_k]);
+        _.each(options.transform, function(transform) {
+            _.each(transform.fields, function(field) {
+                if (!_.isUndefined(data[field])) {
+                    data[field] = transform.fn(data[field]);
                 }
             });
         });
