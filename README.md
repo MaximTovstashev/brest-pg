@@ -50,6 +50,12 @@ table objects and controllers for each table in the database.
 
 ## 4 Changelist
 
+### 0.0.8
+
+- Fixed "limit" injection to comply with PostgreSQL syntax
+- Default filters are now always generated as objects
+- "limit" and "order" filters are now injected into Brest as objects
+
 ### 0.0.7
 
 - Persistent functionality is seriously reworked

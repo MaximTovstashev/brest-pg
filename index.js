@@ -47,8 +47,8 @@ BrestPG.ctrl = function(table_name) {
 };
 
 BrestPG.filters = {
-    limit: "Limit the request <%from%>,<%count%>",
-    order: "Sort by the fields"
+    limit: {description: "Limit the request <%count%>,<%from%>"},
+    order: {description: "Sort by the fields"}
 };
 
 module.exports = BrestPG;

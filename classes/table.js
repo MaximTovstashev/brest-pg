@@ -110,22 +110,22 @@ class Table {
                     defaultFilters[`null_${column}`] = { where: ` AND ${columnDefinition} IS NULL`};
                     defaultFilters[`not_null_${column}`] = { where: ` AND ${columnDefinition} IS NOT NULL` };
 
-                    defaultFiltersAPI[column] = `Filter by ${column} equal to filter value`;
+                    defaultFiltersAPI[column] = {description: `Filter by ${column} equal to filter value`};
                     defaultFiltersAPI[`${column}s`] = {
                         description: `Filter by several values of ${column}`,
                         toArray: true
                     };
-                    defaultFiltersAPI[`not_${column}`] = `Filter by ${column} not equal to filter value`;
+                    defaultFiltersAPI[`not_${column}`] = {description: `Filter by ${column} not equal to filter value`};
                     defaultFiltersAPI[`not_${column}s`] = {
                         description: `Reject filter results by several ${column} values`,
                         toArray: true
                     };
-                    defaultFiltersAPI[`null_${column}`] = `Filter by NULL ${column} entries`;
-                    defaultFiltersAPI[`not_null_${column}`] = `Filter by not NULL ${column} entries`;
+                    defaultFiltersAPI[`null_${column}`] = {description: `Filter by NULL ${column} entries`};
+                    defaultFiltersAPI[`not_null_${column}`] = {description: `Filter by not NULL ${column} entries`};
                 });
 
                 _.each(self.filters, function(filter, filter_key){
-                    defaultFiltersAPI[filter_key] = filter.description || `Custom ${filter_key} filter`;
+                    defaultFiltersAPI[filter_key] = {description: filter.description || `Custom ${filter_key} filter`};
                 });
 
                 //Use class filters (if any) with default filters fallback
@@ -365,12 +365,14 @@ class Table {
      */
     static injectLimit(sql, filters) {
         if (filters['limit']) {
-            var limit = filters['limit'].split(',');
+            var limit = `${filters['limit']}`.split(',');
             if (_.isArray(limit)) {
                 for (var i = 0; i < limit.length; i++) {
                     limit[i] = parseInt(limit[i]);
                 }
-                sql = sql.replace('{{limit}}', ` LIMIT ${limit.join(', ')}`);
+                if (limit.length == 1) sql = sql.replace('{{limit}}', ` LIMIT ${limit[0]}`);
+                else if (limit.length == 2) sql = sql.replace('{{limit}}', ` LIMIT ${limit[0]} OFFSET ${limit[1]}`);
+                else throw "Incorrect number of limit params (1 or 2 expected)"
             } else throw "Failed to parse limit filter"
         }
         return sql;
@@ -463,11 +465,23 @@ class Table {
         });
 
         var sql = self.queries.list.replace('{{columns}}', columns.join(', '));
+        return self.filteredQuery(sql, null, filters, callback);
+    };
+
+    /**
+     * Perfonm custom filter
+     * @param {String} sql
+     * @param {Array} params
+     * @param {Object} filters
+     * @param {Function} callback
+     */
+    filteredQuery(sql, params = [], filters, callback) {
+        var self = this;
         sql = Table.injectLimit(sql, filters);
         sql = Table.injectSort(sql, filters);
         sql = self.db.injectFilters(sql, filters, self.filters);
-        return self.db.query(sql, callback);
-    };
+        return self.db.query(sql, params, callback);
+    }
 
 
     /**
