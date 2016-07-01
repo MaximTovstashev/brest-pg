@@ -47,7 +47,7 @@ BrestPG.ctrl = function(table_name) {
 };
 
 BrestPG.filters = {
-    limit: {description: "Limit the request <%count%>,<%from%>"},
+    limit: {description: "Limit the request <%count%>,<%from%>", toArray: true},
     order: {description: "Sort by the fields"}
 };
 

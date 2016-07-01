@@ -1,9 +1,13 @@
-const async = require('async'),
-    format = require('pg-format'),
-    _ = require('lodash');
+const   _ = require('lodash'),
+        _f = require('util').format,
+        async = require('async'),
+        format = require('pg-format');
 
 const KEY_PRIMARY = 'PRIMARY KEY';
 const KEY_FOREIGN = 'FOREIGN KEY';
+
+const YES = 'YES';
+const NO = 'NO';
 
 const httpStatus = require('../lib/http_status_codes');
 
@@ -20,11 +24,13 @@ class Table {
         this.alias = alias || '';
         this.aliasClause = alias ? `${alias}.` : '';
         this.columns = {};
-        this.primary = [];
+        this.db = db;
         this.defaultIds = [];
+        this.numeric = new Set();
+        this.nullable = new Set();
+        this.primary = [];
         this.p = {};
         this.persistentUpdatesSuspended = 0;
-        this.db = db;
         this.transform = {};
 
         this.PERSISTENT_MODE_SIMPLE = 'persistent_simple';
@@ -39,23 +45,31 @@ class Table {
         async.waterfall([
             /**
              * Request columns info
-             * @param next
+             * @param {Function} next
              */
             function(next) {
                 self.db.query(`
-                                SELECT column_name
+                                SELECT column_name, numeric_precision, is_nullable
                                 FROM information_schema.columns
                                 WHERE table_name = %L;`, self.name, next);
             },
 
             /**
-             * Request constraints info
-             * @param columns
-             * @param next
+             * Fill column types. Request constraints info
+             * @param {Object[]} columns
+             * @param {Function} next
              */
             function(columns, next) {
                 _.each(columns, function(column) {
-                    self.columns[column.column_name] = { name: column.column_name }
+                    self.columns[column.column_name] = { name: column.column_name };
+                    if (column.numeric_precision) {
+                        self.numeric.add(column.column_name);
+                        self.columns[column.column_name].numeric = true;
+                    }
+                    if (column.is_nullable == YES) {
+                        self.nullable.add(column.column_name);
+                        self.columns[column.column_name].nullable = true;
+                    }
                 });
                 self.db.query(`
                                 SELECT
@@ -107,8 +121,6 @@ class Table {
                     defaultFilters[`${column}s`] = { where: ` AND ${columnDefinition} IN (%L)` };
                     defaultFilters[`not_${column}`] = { where: ` AND ${columnDefinition} <> %L` };
                     defaultFilters[`not_${column}s`] = { where: ` AND ${columnDefinition} NOT IN (%L)` };
-                    defaultFilters[`null_${column}`] = { where: ` AND ${columnDefinition} IS NULL`};
-                    defaultFilters[`not_null_${column}`] = { where: ` AND ${columnDefinition} IS NOT NULL` };
 
                     defaultFiltersAPI[column] = {description: `Filter by ${column} equal to filter value`};
                     defaultFiltersAPI[`${column}s`] = {
@@ -120,8 +132,25 @@ class Table {
                         description: `Reject filter results by several ${column} values`,
                         toArray: true
                     };
-                    defaultFiltersAPI[`null_${column}`] = {description: `Filter by NULL ${column} entries`};
-                    defaultFiltersAPI[`not_null_${column}`] = {description: `Filter by not NULL ${column} entries`};
+
+                    if (self.nullable.has(column)) {
+                        defaultFilters[`null_${column}`] = {where: ` AND ${columnDefinition} IS NULL`};
+                        defaultFilters[`not_null_${column}`] = {where: ` AND ${columnDefinition} IS NOT NULL`};
+                        defaultFiltersAPI[`null_${column}`] = {description: `Filter by NULL ${column} entries`};
+                        defaultFiltersAPI[`not_null_${column}`] = {description: `Filter by not NULL ${column} entries`};
+                    }
+
+                    if (self.numeric.has(column)) {
+                        defaultFilters[`${column}_gt`] = { where: ` AND ${columnDefinition} > %L`};
+                        defaultFilters[`${column}_gte`] = { where: ` AND ${columnDefinition} >= %L`};
+                        defaultFilters[`${column}_lt`] = { where: ` AND ${columnDefinition} < %L`};
+                        defaultFilters[`${column}_lte`] = { where: ` AND ${columnDefinition} <= %L`};
+                        defaultFiltersAPI[`${column}_gt`] = {description: `Filter by ${column} greater than filter value`};
+                        defaultFiltersAPI[`${column}_gte`] = {description: `Filter by ${column} greater than or equal to filter value`};
+                        defaultFiltersAPI[`${column}_lt`] = {description: `Filter by ${column} less than filter value`};
+                        defaultFiltersAPI[`${column}_lte`] = {description: `Filter by ${column} less than or equal to filter value`};
+
+                    }
                 });
 
                 _.each(self.filters, function(filter, filter_key){
@@ -365,7 +394,6 @@ class Table {
      */
     static injectLimit(sql, filters) {
         if (filters['limit']) {
-            var limit = `${filters['limit']}`.split(',');
             if (_.isArray(limit)) {
                 for (var i = 0; i < limit.length; i++) {
                     limit[i] = parseInt(limit[i]);
@@ -468,6 +496,36 @@ class Table {
         return self.filteredQuery(sql, null, filters, callback);
     };
 
+
+    static unfoldFilters(filters) {
+        const unfold = {
+            'eq': '%s',
+            'neq': 'not_%s',
+            'in': '%ss',
+            'nin': '%ss',
+            'null': 'null_%s',
+            'nnull': 'not_null_%s',
+            'gt': '%s_gt',
+            'gte': '%s_gte',
+            'lt': '%s_lt',
+            'lte': '%s_lte'
+        };
+        _.each(filters, function(value, key) {
+            if (_.isObject(value)) {
+                console.log(key, 'is folded');
+                _.each(value, function(folded_value, folded_key){
+                    if (unfold[folded_key]) {
+                        console.log('unfolding', folded_key, 'into', _f(unfold[folded_key], key));
+                        filters[_f(unfold[folded_key], key)] = folded_value;
+                    }
+                });
+                delete filters[key];
+            }
+        });
+
+        return filters;
+    }
+
     /**
      * Perfonm custom filter
      * @param {String} sql
@@ -477,6 +535,7 @@ class Table {
      */
     filteredQuery(sql, params = [], filters, callback) {
         var self = this;
+        filters = Table.unfoldFilters(filters);
         sql = Table.injectLimit(sql, filters);
         sql = Table.injectSort(sql, filters);
         sql = self.db.injectFilters(sql, filters, self.filters);
