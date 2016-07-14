@@ -220,6 +220,10 @@ You can use the following folding keys:
 
 ## 4 Changelist
 
+### 0.0.10
+
+- Recursive filters and filtered queries. Somewhat unstable, pretty much unpredictable
+
 ### 0.0.9
 
 - Numeric columns now have comparison autofilters %column%_gt, %column%_gte, %column%_lt, %column%_lte

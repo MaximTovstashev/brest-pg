@@ -117,10 +117,10 @@ class Table {
                 var defaultFiltersAPI = {};
                 _.each(self.columns, function(props, column) {
                     var columnDefinition = `${self.aliasClause}${column}`;
-                    defaultFilters[column] = { where: ` AND ${columnDefinition} = %L` };
-                    defaultFilters[`${column}s`] = { where: ` AND ${columnDefinition} IN (%L)` };
-                    defaultFilters[`not_${column}`] = { where: ` AND ${columnDefinition} <> %L` };
-                    defaultFilters[`not_${column}s`] = { where: ` AND ${columnDefinition} NOT IN (%L)` };
+                    defaultFilters[column] = ` ${columnDefinition} = %L`;
+                    defaultFilters[`${column}s`] = ` ${columnDefinition} IN (%L)`;
+                    defaultFilters[`not_${column}`] = ` ${columnDefinition} <> %L`;
+                    defaultFilters[`not_${column}s`] = ` ${columnDefinition} NOT IN (%L)`;
 
                     defaultFiltersAPI[column] = {description: `Filter by ${column} equal to filter value`};
                     defaultFiltersAPI[`${column}s`] = {
@@ -134,17 +134,17 @@ class Table {
                     };
 
                     if (self.nullable.has(column)) {
-                        defaultFilters[`null_${column}`] = {where: ` AND ${columnDefinition} IS NULL`};
-                        defaultFilters[`not_null_${column}`] = {where: ` AND ${columnDefinition} IS NOT NULL`};
+                        defaultFilters[`null_${column}`] = ` ${columnDefinition} IS NULL`;
+                        defaultFilters[`not_null_${column}`] = ` ${columnDefinition} IS NOT NULL`;
                         defaultFiltersAPI[`null_${column}`] = {description: `Filter by NULL ${column} entries`};
                         defaultFiltersAPI[`not_null_${column}`] = {description: `Filter by not NULL ${column} entries`};
                     }
 
                     if (self.numeric.has(column)) {
-                        defaultFilters[`${column}_gt`] = { where: ` AND ${columnDefinition} > %L`};
-                        defaultFilters[`${column}_gte`] = { where: ` AND ${columnDefinition} >= %L`};
-                        defaultFilters[`${column}_lt`] = { where: ` AND ${columnDefinition} < %L`};
-                        defaultFilters[`${column}_lte`] = { where: ` AND ${columnDefinition} <= %L`};
+                        defaultFilters[`${column}_gt`] = ` ${columnDefinition} > %L`;
+                        defaultFilters[`${column}_gte`] = ` ${columnDefinition} >= %L`;
+                        defaultFilters[`${column}_lt`] = ` ${columnDefinition} < %L`;
+                        defaultFilters[`${column}_lte`] = ` ${columnDefinition} <= %L`;
                         defaultFiltersAPI[`${column}_gt`] = {description: `Filter by ${column} greater than filter value`};
                         defaultFiltersAPI[`${column}_gte`] = {description: `Filter by ${column} greater than or equal to filter value`};
                         defaultFiltersAPI[`${column}_lt`] = {description: `Filter by ${column} less than filter value`};
@@ -157,8 +157,16 @@ class Table {
                     defaultFiltersAPI[filter_key] = {description: filter.description || `Custom ${filter_key} filter`};
                 });
 
+                let recursiveFilters = {};
+                let basicFilters = {};
+                _.each(defaultFilters, function(defaultFilter, key){
+                    recursiveFilters[key] = {where: `AND (${defaultFilter} OR (${self.aliasClause}${key} IS NULL AND depth > 1))`};
+                    basicFilters[key] = {where: `AND ${defaultFilter}`};
+                });
+
                 //Use class filters (if any) with default filters fallback
-                self.filters = _.defaults(self.filters, defaultFilters);
+                self.filters = _.defaults(self.filters, basicFilters);
+                self.filtersRecursive = _.defaults(self.filtersRecursive, recursiveFilters);
                 self.filtersAPI = defaultFiltersAPI;
 
                 var aliasDefinition = self.alias ? ` AS ${self.alias}` : '';
@@ -512,10 +520,8 @@ class Table {
         };
         _.each(filters, function(value, key) {
             if (_.isObject(value)) {
-                console.log(key, 'is folded');
                 _.each(value, function(folded_value, folded_key){
                     if (unfold[folded_key]) {
-                        console.log('unfolding', folded_key, 'into', _f(unfold[folded_key], key));
                         filters[_f(unfold[folded_key], key)] = folded_value;
                     }
                 });
@@ -527,7 +533,7 @@ class Table {
     }
 
     /**
-     * Perfonm custom filter
+     * Perform custom filtered query
      * @param {String} sql
      * @param {Array} params
      * @param {Object} filters
@@ -542,6 +548,23 @@ class Table {
         return self.db.query(sql, params, callback);
     }
 
+
+    /**
+     * Perform custom filtered query with recursive autofilters
+     * @param {String} sql
+     * @param {Array} params
+     * @param {Object} filters
+     * @param {Function} callback
+     */
+    filteredQueryRecursive(sql, params = [], filters, callback) {
+        var self = this;
+        filters = Table.unfoldFilters(filters);
+        sql = Table.injectLimit(sql, filters);
+        sql = Table.injectSort(sql, filters);
+        sql = self.db.injectFilters(sql, filters, self.filtersRecursive);
+        console.log(sql);
+        return self.db.query(sql, params, callback)
+    }
 
     /**
      * Insert
@@ -688,8 +711,8 @@ class Table {
     /**
      * Transforms data according to crud options
      *
-     * @param filters
-     * @param callback
+     * @param data
+     * @param options
      */
     _transform(data, options) {
         if (_.isUndefined(options.transform) || !_.isArray(options.transform) || options.transform.length == 0) {
