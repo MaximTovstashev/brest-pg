@@ -220,6 +220,10 @@ You can use the following folding keys:
 
 ## 4 Changelist
 
+### 0.0.11-1
+
+- Temporary "limit" filter fix
+
 ### 0.0.11
 
 - Fixed "order" filter to be parsed correctly

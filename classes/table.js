@@ -402,6 +402,7 @@ class Table {
      */
     static injectLimit(sql, filters) {
         if (filters['limit']) {
+            var limit = `${filters['limit']}`.split(',');
             if (_.isArray(limit)) {
                 for (var i = 0; i < limit.length; i++) {
                     limit[i] = parseInt(limit[i]);
