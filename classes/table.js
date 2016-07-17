@@ -377,23 +377,23 @@ class Table {
      * @param filters
      * @returns {*}
      */
-    static injectSort(sql, filters) {
-        if (filters['order']) {
-            var sort = filters['order'].split(',');
-            if (_.isArray(sort)) {
-                var direction = 'ASC';
-                if (sort.indexOf('desc') > -1) {
-                    direction = 'DESC';
-                    delete sort[sort.indexOf('desc')];
-                }
-                if (sort.length) {
-                    var fields = sort.join(", ");
-                    sql = sql.replace('{{order}}', ` ORDER BY ${fields} ${direction}`);
-                }
-            } else throw "Failed to parse order filter"
-        }
-        return sql;
-    };
+     static injectSort(sql, filters) {
+         if (filters['order']) {
+             var sort = filters['order'].split(',');
+             if (_.isArray(sort)) {
+                 var direction = 'ASC';
+                 if (_.intersection(sort, ['desc', 'DESC']).length > 0) {
+                     direction = 'DESC';
+                     sort = _.without(sort, 'desc', 'DESC', 'asc', 'ASC');
+                 }
+                 if (sort.length) {
+                     var fields = sort.join(", ");
+                     sql = sql.replace('{{order}}', ` ORDER BY ${fields} ${direction}`);
+                 }
+             } else throw "Failed to parse order filter"
+         }
+         return sql;
+     };
 
     /**
      * Inject limit into the request

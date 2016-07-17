@@ -220,6 +220,11 @@ You can use the following folding keys:
 
 ## 4 Changelist
 
+### 0.0.11
+
+- Fixed "order" filter to be parsed correctly
+- Fixed "order" filter to respect string case
+
 ### 0.0.10
 
 - Recursive filters and filtered queries. Somewhat unstable, pretty much unpredictable
