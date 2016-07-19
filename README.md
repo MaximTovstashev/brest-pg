@@ -218,7 +218,52 @@ You can use the following folding keys:
 - PERSISTENT_MODE_ARRAY_BUNDLE: The rows are bundled into arrays.
 - PERSISTENT_MODE_ARRAY_KEY: The values of [collect_from] rows are stored in array bundles
 
+### 3.3 Upsert options
+
+Options passed to insert:
+
+- {conflict: 'do_nothing'} Do nothing on insert conflict
+- {conflict: 'do_update'} Update existing record with new data
+
+### 3.4 Limit restrictions
+
+By default you can have maximun 100 records in the list request. It can't be overridden by direct filter request, but you can change
+
+```
+	this.topLimit = 500; 
+```
+
+in table constructor
+
+### 3.5 Order format
+
+'order' filter has the following format: ?order={field1}:[ASC|DESC],{field2}:[ASC|DESC],(...),{fieldN}:[ASC|DESC]
+
+```
+	v1/user?order=id:asc,first_name:desc
+```
+
+Ascending direction can be skipped
+
+```
+	v1/user?order=id,first_name:desc
+```
+Char case is arbitrary
+
+```
+	v1/user?order=Id:Asc,First_Name:DESC
+```
+
+
 ## 4 Changelist
+
+### 0.0.12
+
+- Upsert options added
+- Removed broken limit cast to Array
+- Added limit now can't be set by filter higher than Table::topLimit
+- Fixed issue with 'order' filter vulnerabilities
+- Introduced new format for 'order'
 
 ### 0.0.11-1
 

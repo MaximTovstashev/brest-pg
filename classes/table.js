@@ -9,6 +9,10 @@ const KEY_FOREIGN = 'FOREIGN KEY';
 const YES = 'YES';
 const NO = 'NO';
 
+const ASC = 'ASC';
+const DESC = 'DESC';
+const POSSIBLE_DIRECTIONS = new Set([ASC, DESC]);
+
 const httpStatus = require('../lib/http_status_codes');
 
 class Table {
@@ -29,9 +33,11 @@ class Table {
         this.numeric = new Set();
         this.nullable = new Set();
         this.primary = [];
+        this.non_primary = [];
         this.p = {};
         this.persistentUpdatesSuspended = 0;
-        this.transform = {};
+        this.preprocess = {};
+        this.topLimit = 100;
 
         this.PERSISTENT_MODE_SIMPLE = 'persistent_simple';
         this.PERSISTENT_MODE_ASSOC = 'persistent_assoc';
@@ -113,9 +119,15 @@ class Table {
              */
             function(next) {
                 //Set default filters for all table columns
-                var defaultFilters = {};
-                var defaultFiltersAPI = {};
+                const defaultFilters = {};
+                const defaultFiltersAPI = {};
+                self.non_primary = [];
+
                 _.each(self.columns, function(props, column) {
+                    if (self.primary.indexOf(column) === -1) {
+                        self.non_primary.push(column);
+                    }
+
                     var columnDefinition = `${self.aliasClause}${column}`;
                     defaultFilters[column] = ` ${columnDefinition} = %L`;
                     defaultFilters[`${column}s`] = ` ${columnDefinition} IN (%L)`;
@@ -175,7 +187,7 @@ class Table {
                 self.queries = _.defaults(self.queries, {
                     row: `SELECT ${self.aliasClause}*{{select}} FROM "${self.name}"${aliasDefinition}{{join}} WHERE true{{whereClause}} {{where}} {{group}} {{having}} {{order}} LIMIT 1`,
                     list: `SELECT ${self.aliasClause}*{{select}} FROM "${self.name}"${aliasDefinition}{{join}} WHERE true{{where}} {{group}} {{having}} {{order}} {{limit}}`,
-                    insert: `INSERT INTO "${self.name}"${aliasDefinition} ({{columns}}) VALUES ({{values}}){{returning}}`,
+                    insert: `INSERT INTO "${self.name}"${aliasDefinition} ({{columns}}) VALUES ({{values}}){{conflict}}{{returning}}`,
                     update: `UPDATE "${self.name}"${aliasDefinition} SET {{columns}} WHERE true ${self.defaultIds}`,
                     del: `DELETE FROM "${self.name}"${aliasDefinition} WHERE true ${self.defaultIds}`,
                     delWhere: `DELETE FROM "${self.name}"${aliasDefinition} WHERE true {{where}}`,
@@ -183,6 +195,13 @@ class Table {
                 });
 
                 self.persistentAssoc = self.persistentAssoc || {};
+
+                self.conflict = {
+                    do_nothing: 'ON CONFLICT DO NOTHING',
+                    do_update: `ON CONFLICT (${self.primary.join(',')}) DO UPDATE SET (${self.non_primary.join(', ')}) = (EXCLUDED.${self.non_primary.join(', EXCLUDED.')})`
+                };
+
+                self.returning = self.primary.length ? ` RETURNING ${self.primary.join(', ')}` : '';
 
                 next();
             }
@@ -377,18 +396,28 @@ class Table {
      * @param filters
      * @returns {*}
      */
-     static injectSort(sql, filters) {
-         if (filters['order']) {
+     injectSort(sql, filters) {
+        const self = this;
+        if (filters['order']) {
              var sort = filters['order'].split(',');
              if (_.isArray(sort)) {
-                 var direction = 'ASC';
-                 if (_.intersection(sort, ['desc', 'DESC']).length > 0) {
-                     direction = 'DESC';
-                     sort = _.without(sort, 'desc', 'DESC', 'asc', 'ASC');
-                 }
-                 if (sort.length) {
-                     var fields = sort.join(", ");
-                     sql = sql.replace('{{order}}', ` ORDER BY ${fields} ${direction}`);
+                 const preparedSort = [];
+                 _.each(sort, function(field){
+                        const splitted = field.split(':');
+                        let sort_column = splitted[0].toLowerCase();
+                        if (_.isUndefined(self.columns[sort_column])) {
+                            console.log(`Invalid sort field ${sort_column}`);
+                            return;
+                        }
+                        let sort_order = splitted[1] ? splitted[1].toUpperCase() : ASC;
+                        if (POSSIBLE_DIRECTIONS.has(sort_order)) {
+                            preparedSort.push(`${sort_column} ${sort_order}`);
+                        } else {
+                            console.log(`Invalid direction ${sort_order}`);
+                        }
+                 });
+                 if (preparedSort.length) {
+                     sql = sql.replace('{{order}}', ` ORDER BY ${preparedSort.join(', ')}`);
                  }
              } else throw "Failed to parse order filter"
          }
@@ -400,13 +429,15 @@ class Table {
      * @param sql
      * @param filters
      */
-    static injectLimit(sql, filters) {
+    injectLimit(sql, filters) {
+        const self = this;
         if (filters['limit']) {
-            var limit = `${filters['limit']}`.split(',');
+            const limit = filters['limit'];
             if (_.isArray(limit)) {
                 for (var i = 0; i < limit.length; i++) {
                     limit[i] = parseInt(limit[i]);
                 }
+                limit[0] = Math.min(self.topLimit, limit[0]);
                 if (limit.length == 1) sql = sql.replace('{{limit}}', ` LIMIT ${limit[0]}`);
                 else if (limit.length == 2) sql = sql.replace('{{limit}}', ` LIMIT ${limit[0]} OFFSET ${limit[1]}`);
                 else throw "Incorrect number of limit params (1 or 2 expected)"
@@ -421,11 +452,20 @@ class Table {
      * @returns {string}
      */
     injectReturning(sql) {
-        var returning = '';
-        if (this.primary && this.primary.length) {
-            returning = ' RETURNING ' + this.primary.join(', ');
+        return sql.replace('{{returning}}', this.returning);
+    }
+
+
+    injectConflict(sql, mode) {
+        let conflict = '';
+        if (mode) {
+            if (this.conflict[mode]) {
+                conflict = ' ' + this.conflict[mode];
+            } else {
+                console.log(`WARNING: non-existing conflict resolve mode ${mode}`);
+            }
         }
-        return sql.replace('{{returning}}', returning);
+        return sql.replace('{{conflict}}', conflict);
     }
 
     /**
@@ -520,7 +560,7 @@ class Table {
             'lte': '%s_lte'
         };
         _.each(filters, function(value, key) {
-            if (_.isObject(value)) {
+            if (_.isObject(value) && !_.isArray(value)) {
                 _.each(value, function(folded_value, folded_key){
                     if (unfold[folded_key]) {
                         filters[_f(unfold[folded_key], key)] = folded_value;
@@ -543,8 +583,8 @@ class Table {
     filteredQuery(sql, params = [], filters, callback) {
         var self = this;
         filters = Table.unfoldFilters(filters);
-        sql = Table.injectLimit(sql, filters);
-        sql = Table.injectSort(sql, filters);
+        sql = self.injectLimit(sql, filters);
+        sql = self.injectSort(sql, filters);
         sql = self.db.injectFilters(sql, filters, self.filters);
         return self.db.query(sql, params, callback);
     }
@@ -560,10 +600,9 @@ class Table {
     filteredQueryRecursive(sql, params = [], filters, callback) {
         var self = this;
         filters = Table.unfoldFilters(filters);
-        sql = Table.injectLimit(sql, filters);
-        sql = Table.injectSort(sql, filters);
+        sql = self.injectLimit(sql, filters);
+        sql = self.injectSort(sql, filters);
         sql = self.db.injectFilters(sql, filters, self.filtersRecursive);
-        console.log(sql);
         return self.db.query(sql, params, callback)
     }
 
@@ -574,25 +613,25 @@ class Table {
      * @param {Function} callback
      */
     insert(data, options, callback) {
-        var self = this;
+        const self = this;
 
         if (_.isFunction(options)) {
             callback = options;
             options = {};
         }
 
-        if (!options) options = {};
-        options = _.defaults(options, self.preprocess);
+        options = _.defaults(options, {preprocess: self.preprocess});
 
         var insert_data = _.pick(data, _.keys(self.columns));
-
-        insert_data = self._transform(insert_data, options);
+        insert_data = self._transform(insert_data, options.preprocess);
 
         var sql = self.queries.insert
             .replace('{{columns}}', '%I')
             .replace('{{values}}', '%L');
 
         sql = self.injectReturning(sql);
+        sql = self.injectConflict(sql, options.conflict);
+
 
         return self.db.row(sql, [_.keys(insert_data), _.values(insert_data)], function(err, res) {
             if (err) callback(err);
@@ -612,8 +651,8 @@ class Table {
      * @param callback
      */
     update(data, options, callback) {
-        var self = this;
-        var valuesStr = [];
+        const self = this;
+        const valuesStr = [];
 
         if (_.isFunction(options)) {
             callback = options;
@@ -623,11 +662,9 @@ class Table {
         if (!options) options = {};
         options = _.defaults(options, self.transform);
 
-        var update_data = _.pick(data, _.difference(_.keys(self.columns), self.primary));
-
+        let update_data = _.pick(data, _.difference(_.keys(self.columns), self.primary));
         update_data = self._transform(update_data, options);
-
-        var where_data = _.values(_.pick(data, self.primary));
+        const where_data = _.values(_.pick(data, self.primary));
 
         _.each(update_data, function(value, column) {
             valuesStr.push(format('%I = %L', column, value));
