@@ -46,6 +46,9 @@ BrestPG.ctrl = function(table_name) {
     return BrestPG.controllers.get(table_name);
 };
 
+BrestPG.CONFLICT_DO_UPDATE = 'do_update';
+BrestPG.CONFLICT_DO_NOTHING = 'do_nothing';
+
 BrestPG.filters = {
     limit: {description: "Limit the request <%count%>,<%from%>", toArray: true},
     order: {description: "Sort by the fields"}
