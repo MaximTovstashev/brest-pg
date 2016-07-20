@@ -230,7 +230,7 @@ Options passed to insert:
 By default you can have maximun 100 records in the list request. It can't be overridden by direct filter request, but you can change
 
 ```
-	this.topLimit = 500; 
+	this.topLimit = 500;
 ```
 
 in table constructor
@@ -256,6 +256,11 @@ Char case is arbitrary
 
 
 ## 4 Changelist
+
+### 0.0.14
+
+- Temp fix: passing custom string as a sorting order
+- 'limit' filter can be a number
 
 ### 0.0.13
 

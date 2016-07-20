@@ -405,10 +405,10 @@ class Table {
                  _.each(sort, function(field){
                         const splitted = field.split(':');
                         let sort_column = splitted[0].toLowerCase();
-                        if (_.isUndefined(self.columns[sort_column])) {
-                            console.log(`Invalid sort field ${sort_column}`);
-                            return;
-                        }
+                        // if (_.isUndefined(self.columns[sort_column])) {
+                        //     console.log(`Invalid sort field ${sort_column}`);
+                        //     return;
+                        // }
                         let sort_order = splitted[1] ? splitted[1].toUpperCase() : ASC;
                         if (POSSIBLE_DIRECTIONS.has(sort_order)) {
                             preparedSort.push(`${sort_column} ${sort_order}`);
@@ -441,6 +441,8 @@ class Table {
                 if (limit.length == 1) sql = sql.replace('{{limit}}', ` LIMIT ${limit[0]}`);
                 else if (limit.length == 2) sql = sql.replace('{{limit}}', ` LIMIT ${limit[0]} OFFSET ${limit[1]}`);
                 else throw "Incorrect number of limit params (1 or 2 expected)"
+            } else if (limit === parseInt(limit)) {//limit is int
+                sql = sql.replace('{{limit}}', ` LIMIT ${parseInt(limit)}`);
             } else throw "Failed to parse limit filter"
         }
         return sql;
