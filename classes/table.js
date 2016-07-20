@@ -188,7 +188,7 @@ class Table {
                     row: `SELECT ${self.aliasClause}*{{select}} FROM "${self.name}"${aliasDefinition}{{join}} WHERE true{{whereClause}} {{where}} {{group}} {{having}} {{order}} LIMIT 1`,
                     list: `SELECT ${self.aliasClause}*{{select}} FROM "${self.name}"${aliasDefinition}{{join}} WHERE true{{where}} {{group}} {{having}} {{order}} {{limit}}`,
                     insert: `INSERT INTO "${self.name}"${aliasDefinition} ({{columns}}) VALUES ({{values}}){{conflict}}{{returning}}`,
-                    update: `UPDATE "${self.name}"${aliasDefinition} SET {{columns}} WHERE true ${self.defaultIds}`,
+                    update: `UPDATE "${self.name}"${aliasDefinition} SET {{columns}} WHERE true {{where}}`,
                     del: `DELETE FROM "${self.name}"${aliasDefinition} WHERE true ${self.defaultIds}`,
                     delWhere: `DELETE FROM "${self.name}"${aliasDefinition} WHERE true {{where}}`,
                     count: `SELECT COUNT(*) as cnt FROM "${self.name}"${aliasDefinition} WHERE true {{where}}`
@@ -262,7 +262,7 @@ class Table {
      * @param callback
      */
     updatePersistent(callback) {
-        var self = this;
+        const self = this;
         if ((!_.isEmpty(self.persistent) || !_.isEmpty(self.persistentAssoc)) && self.persistentUpdatesSuspended == 0) {
             self.suspendPersistentUpdates();
             async.waterfall([
@@ -475,7 +475,7 @@ class Table {
      * @param {Function} callback
      */
     row(ids, filters, callback) {
-        var self = this;
+        const self = this;
         if (_.isFunction(filters)) {
             callback = filters;
             filters = {};
@@ -523,7 +523,7 @@ class Table {
      * @param {Function} callback
      */
     list(filters, callback) {
-        var self = this;
+        const self = this;
         if (_.isFunction(filters)) {
             callback = filters;
             filters = {};
@@ -581,7 +581,7 @@ class Table {
      * @param {Function} callback
      */
     filteredQuery(sql, params = [], filters, callback) {
-        var self = this;
+        const self = this;
         filters = Table.unfoldFilters(filters);
         sql = self.injectLimit(sql, filters);
         sql = self.injectSort(sql, filters);
@@ -598,7 +598,7 @@ class Table {
      * @param {Function} callback
      */
     filteredQueryRecursive(sql, params = [], filters, callback) {
-        var self = this;
+        const self = this;
         filters = Table.unfoldFilters(filters);
         sql = self.injectLimit(sql, filters);
         sql = self.injectSort(sql, filters);
@@ -622,10 +622,10 @@ class Table {
 
         options = _.defaults(options, {preprocess: self.preprocess});
 
-        var insert_data = _.pick(data, _.keys(self.columns));
+        let insert_data = _.pick(data, _.keys(self.columns));
         insert_data = self._transform(insert_data, options.preprocess);
 
-        var sql = self.queries.insert
+        let sql = self.queries.insert
             .replace('{{columns}}', '%I')
             .replace('{{values}}', '%L');
 
@@ -653,26 +653,33 @@ class Table {
     update(data, options, callback) {
         const self = this;
         const valuesStr = [];
+        const whereStr = [];
 
         if (_.isFunction(options)) {
             callback = options;
             options = {};
         }
 
-        if (!options) options = {};
-        options = _.defaults(options, self.transform);
+        options = _.defaults(options, {preprocess: self.preprocess});
 
-        let update_data = _.pick(data, _.difference(_.keys(self.columns), self.primary));
-        update_data = self._transform(update_data, options);
-        const where_data = _.values(_.pick(data, self.primary));
+        if (_.isString(options.update_by)) options.update_by = [options.update_by];
+        const update_by_columns = options.update_by || self.primary;
+        let update_data = _.pick(data, _.difference(_.keys(self.columns), _.concat(self.primary, options.update_by)));
+        update_data = self._transform(update_data, options.preprocess);
 
         _.each(update_data, function(value, column) {
             valuesStr.push(format('%I = %L', column, value));
         });
 
-        var sql = self.queries.update.replace('{{columns}}', valuesStr.join(', '));
+        for (const update_by_column of update_by_columns) {
+            whereStr.push(format('%I = %L', update_by_column, data[update_by_column]));
+        }
 
-        return self.db.query(sql, where_data, function(err) {
+        let sql = self.queries.update
+            .replace('{{columns}}', valuesStr.join(', '))
+            .replace('{{where}}', ' AND ' + whereStr.join(' AND '));
+
+        return self.db.query(sql, function(err) {
             if (err) callback(err);
             else {
                 callback(null, { update: 'success' });
@@ -689,7 +696,7 @@ class Table {
      * @param callback
      */
     del(ids, callback) {
-        var self = this;
+        const self = this;
         var sql = self.queries.del;
         var queryIds = [];
         if (!_.isObject(ids)) {
@@ -721,7 +728,7 @@ class Table {
      * @param callback
      */
     count(filters, callback) {
-        var self = this;
+        const self = this;
         if (_.isFunction(filters)) {
             callback = filters;
             filters = {};

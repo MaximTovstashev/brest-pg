@@ -257,6 +257,10 @@ Char case is arbitrary
 
 ## 4 Changelist
 
+### 0.0.13
+
+- Update options "update_by" added.
+
 ### 0.0.12
 
 - Upsert options added
