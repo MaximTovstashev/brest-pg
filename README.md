@@ -257,6 +257,10 @@ Char case is arbitrary
 
 ## 4 Changelist
 
+### 0.0.14-1
+
+- Upgraded 'pg' to 6.0.3
+
 ### 0.0.14
 
 - Temp fix: passing custom string as a sorting order
