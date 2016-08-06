@@ -1,5 +1,5 @@
 # brest-pg
-PostgreSQL library for Brest
+PostgreSQL library for Brest. 
 
 ## 1. Usage
 
@@ -33,6 +33,91 @@ In Brest project settings.js file, add postgres key:
 
 BrestPG automatically keeps track of database tables, creating
 table objects and controllers for each table in the database.
+
+When you will require additional functionality, you can extend basic _Table_ and _Controller_ classes.
+
+### 1.4 Default methods
+#### 1.4.1 Table.row(filters, callback)
+
+Request a single row from the database. If a single value is passed as _filters_ parameter, it is treated as 
+filter by first primary field, so if the primary key covers more than one column you might want to pass them as an object.
+
+Request is automatically limited to one row, which is passed to callback as an object. If no records in the table match the
+filtering, the callback is called with an error. Please, note that same behaviour will occur on empty tables.
+
+If you suppose that having none, or more than one result is a normal situation for the request, you should use _list_ method.
+
+You can also use **$allowEmpty:true** filter directive to suppress error on empty result.
+
+#### 1.4.2 Table.list(filters, callback)
+
+Same as Table.row, but the array of records is returned. If no records match the filtering, 
+an empty array is passed to callback.
+
+As a custom filter, you can use **$recursive** to ensure that default query will be built with recursion in mind.
+
+Use **$distinct** filter directive to perform "SELECT DISTINCT" query.
+
+#### 1.4.3 Table.insert(data, filters, callback)
+
+Insert new record into the table. Here, filtering is pretty much limited and used mostly to pass options.
+
+**$preprocess** filter is used to pass custom preprocessing functions to the request. 
+
+```javascript
+{
+    $preprocess: [
+        {
+		fields: ['foo', 'bar'],
+		fn: function(value) {return value*2}
+    	},
+	{
+		fields: ['foz', 'baz'],
+		fn: function(value) {return value+'Oops'}
+	},
+    ]
+}
+```
+
+Callback returns the primary keys for the newly inserted row, unless **returning** is overridden in class definition.
+
+#### 1.4.4 Table.update(data, filters, callback)
+
+Update table with **data**.
+
+By default, the columns with primary keys are used to defined updated records. You can override that with
+**$update_by** filter directive. **$update_by** is an array of column names.
+ 
+ ```javascript
+ {
+    $update_by: ['username', 'gender']
+ }
+ ```
+
+Any other appliable filter from which "WHERE" query can be built, can be used to define updated records as well.
+
+**$preprocess** works on data in the same manner it does in Table.insert. Please keep in mind, that data is first 
+_preprocessed_ and then passed to **$update_by**, which means, that under certain conditions, the fields you use to
+define updated records may also be preprocessed.
+
+#### 1.4.5 Table.delete(filters, callback)
+
+Delete table records.
+
+*filters* parameter is treated the same way as in Table.row with the only difference that empty filter object
+is forbidden by default (as it will delete all table records in one go).
+
+Use **$forceEmptyDelete** filter directive or custom query, if it is what you really want.
+
+Callback returns primary keys of deleted entries, unless **returning** is overridden in class definition.
+
+#### 1.4.6 Table.count(filters, callback)
+
+Return the number of filtered records. Any filters apply except for **limit**
+
+#### 1.4.7 Table.exists(filters, callback)
+
+Returns **true** if at least one filtered record exists. It is a shortcut for Table.count, cast to boolean.
 
 ### 2 Filters
 
@@ -69,15 +154,15 @@ Each table is initialized with autofilters for each column:
 
 - **"%column%"**: select rows with %column% equal to filter value
 
-Example:
 ```javascript
 	function cherchez_la_femme(callback) {
 		User.list({gender: 'f'}, callback);
 	}
 ```
 
-- **"%column%s"**: select rows with %column% values belong to provided array
-Example:
+- **"%column%s"**: select rows with %column% values belong to provided array. 
+If provided array is empty, this clause is treated as "false"
+
 ```javascript
 	//Column is "manufacturer"
 	function find_german_cars(callback) {
@@ -92,7 +177,8 @@ Example:
 		Crew.list({not_skirt_color: 'red'}, callback);
 	}
 ```
-- **"not_%column%s"**: select rows with %column% values not beloning to provided array
+- **"not_%column%s"**: select rows with %column% values not beloning to provided array. 
+If provided array is empty, this clause is treated as "true"
 ```javascript
 	//Column is "color"
 	function not_in_rainbow(callback){
@@ -256,6 +342,21 @@ Char case is arbitrary
 
 
 ## 4 Changelist
+
+### 0.1.0
+
+- Table.row now accepts only two parameters: filters and callback. "filters" can be a single Number/String value
+- Table.row and Table.list now use same *Table.queries.select* query template
+- Table.delete doesn't accept empty filters unless forced
+- Table.delete doesn't accept 'limit' filter as it is not supported by PostgreSQL
+- "update_by" filter is now spelled as $update_by
+- $recursive filter directive added for select queries
+- $distinct filter directive added for select queries
+- Emply arrays no longer break requests
+- Filters can be bundled into arrays to create OR queries
+- Removed "temp fix" for custom string in sorting order: use custom filters instead!
+- Lot's of internal refactoring
+
 
 ### 0.0.14
 

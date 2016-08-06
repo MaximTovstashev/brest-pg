@@ -1,7 +1,9 @@
 const   _ = require('lodash'),
         _f = require('util').format,
         async = require('async'),
-        format = require('pg-format');
+        fs = require('fs'),
+        format = require('pg-format'),
+        path = require('path');
 
 const KEY_PRIMARY = 'PRIMARY KEY';
 const KEY_FOREIGN = 'FOREIGN KEY';
@@ -9,11 +11,32 @@ const KEY_FOREIGN = 'FOREIGN KEY';
 const YES = 'YES';
 const NO = 'NO';
 
-const ASC = 'ASC';
-const DESC = 'DESC';
-const POSSIBLE_DIRECTIONS = new Set([ASC, DESC]);
+const BASIC_INJECTOR = 'basic';
+const JS_EXTENTION = '.js';
+
+const OPTIONAL_TAG_REGEXP = /({{[a-z]*}})/g;
+const FORCED_TAG_REGEXP = /{%([a-z]*)%}/g;
+const ANY_TAG_REGEXP = /({[{|%][a-z]*?[}|%]})/g;
+
+const FORCED_TAG_REGEXP_POSITION = 1;
 
 const httpStatus = require('../lib/http_status_codes');
+
+const FOLDED_CLAUSES = {
+    'eq': '%s',
+    'neq': 'not_%s',
+    'in': '%ss',
+    'nin': '%ss',
+    'null': 'null_%s',
+    'nnull': 'not_null_%s',
+    'gt': '%s_gt',
+    'gte': '%s_gte',
+    'lt': '%s_lt',
+    'lte': '%s_lte'
+};
+
+const NON_FOLDABLE_FILTERS = ['update'];
+const NON_GROUPABLE_FILTERS = ['where'];
 
 class Table {
 
@@ -24,40 +47,119 @@ class Table {
      * @param {String} [alias]
      */
     constructor(db, table_name, alias) {
+        /**
+         * Database table name
+         * @type {String}
+         */
         this.name = table_name;
+        /**
+         * Table name shortcut like 'u' in `SELECT u.* FROM user AS u`
+         * @type {String}
+         */
         this.alias = alias || '';
+        /**
+         * Query-ready string with table name alias.
+         * @type {string}
+         */
         this.aliasClause = alias ? `${alias}.` : '';
+        /**
+         * Object with table names as keys and properties as values
+         * @type {Object}
+         */
         this.columns = {};
+        /**
+         * Db object pointer
+         * @type {DB}
+         */
         this.db = db;
-        this.defaultIds = [];
+        /**
+         * Set of numeric columns names
+         * @type {Set}
+         */
         this.numeric = new Set();
+        /**
+         * Set of nullable columns names
+         * @type {Set}
+         */
         this.nullable = new Set();
+
+        this.falseIfEmpty = new Set();
+        this.trueIfEmpty = new Set();
+        /**
+         * Array of the columns with primary keys
+         * @type {Array}
+         */
         this.primary = [];
+        /**
+         * Array of columns not involved in primary keys
+         * @type {Array}
+         */
         this.non_primary = [];
+        /**
+         * Persistant data storage. Please, read-only outside of the persistent update logic
+         * @type {Object}
+         */
         this.p = {};
+        /**
+         * Persistent update status flag. Updatable if zero. In progress, if non-zero.
+         * @type {Number}
+         */
         this.persistentUpdatesSuspended = 0;
-        this.preprocess = {};
+        /**
+         * Array of preprocessors. See manual
+         * @type {Array}
+         */
+        this.$preprocess = [];
+        /**
+         * Ceiling for the "limit" clause.
+         * @type {number}
+         */
         this.topLimit = 100;
+
+        /**
+         * Injectors
+         * @type {Proxy}
+         */
+        this.injectors = new Proxy({}, Table.injectorsHandler());
 
         this.PERSISTENT_MODE_SIMPLE = 'persistent_simple';
         this.PERSISTENT_MODE_ASSOC = 'persistent_assoc';
         this.PERSISTENT_MODE_ARRAY_BUNDLE = 'persistent_array';
         this.PERSISTENT_MODE_ARRAY_KEY = 'persistent_key';
+        const persistentPath = path.join(path.dirname(module.filename), '..', 'persistent');
+        this.persistentHandlers = {
+            [this.PERSISTENT_MODE_SIMPLE]: require(path.join(persistentPath, 'simple')),
+            [this.PERSISTENT_MODE_ASSOC]: require(path.join(persistentPath, 'assoc')),
+            [this.PERSISTENT_MODE_ARRAY_BUNDLE]: require(path.join(persistentPath, 'array')),
+            [this.PERSISTENT_MODE_ARRAY_KEY]: require(path.join(persistentPath, 'key'))
+        };
         // this.PERSISTENT_MODE_TREE = 'persistent_tree';  TODO later
     }
 
+    /**
+     * Return injectors handler
+     * @return {Object}
+     */
+    static injectorsHandler() {
+        return {
+            get(target, key) {
+                return key in target ? target[key] : target[BASIC_INJECTOR];
+            }
+        }
+    }
+
     init(callback) {
-        let self = this;
+
         async.waterfall([
             /**
              * Request columns info
              * @param {Function} next
              */
-            function(next) {
-                self.db.query(`
+            (next) => {
+                this.db.query(`
                                 SELECT column_name, numeric_precision, is_nullable
                                 FROM information_schema.columns
-                                WHERE table_name = %L;`, self.name, next);
+                                WHERE table_name = %L;`, this.name, next);
             },
 
             /**
@@ -65,19 +167,19 @@ class Table {
              * @param {Object[]} columns
              * @param {Function} next
              */
-            function(columns, next) {
-                _.each(columns, function(column) {
-                    self.columns[column.column_name] = { name: column.column_name };
+            (columns, next) => {
+                _.each(columns, (column) => {
+                    this.columns[column.column_name] = { name: column.column_name };
                     if (column.numeric_precision) {
-                        self.numeric.add(column.column_name);
-                        self.columns[column.column_name].numeric = true;
+                        this.numeric.add(column.column_name);
+                        this.columns[column.column_name].numeric = true;
                     }
                     if (column.is_nullable == YES) {
-                        self.nullable.add(column.column_name);
-                        self.columns[column.column_name].nullable = true;
+                        this.nullable.add(column.column_name);
+                        this.columns[column.column_name].nullable = true;
                     }
                 });
-                self.db.query(`
+                this.db.query(`
                                 SELECT
                                     kcu.column_name, constraint_type
                                 FROM
@@ -85,7 +187,7 @@ class Table {
                                 JOIN information_schema.key_column_usage AS kcu ON tc.constraint_name = kcu.constraint_name
                                 JOIN information_schema.constraint_column_usage AS ccu ON ccu.constraint_name = tc.constraint_name
                                 WHERE constraint_type IN (%L) AND tc.table_name=%L;`, [
-                    [KEY_PRIMARY, KEY_FOREIGN], self.name
+                    [KEY_PRIMARY, KEY_FOREIGN], this.name
                 ], next);
             },
 
@@ -94,22 +196,20 @@ class Table {
              * @param constraints
              * @param next
              */
-            function(constraints, next) {
+            (constraints, next) => {
                 var constraint_found = false;
-                _.each(constraints, function(constraint) {
+                _.each(constraints, (constraint) => {
                     if (constraint.constraint_type == KEY_PRIMARY) {
-                        self.columns[constraint.column_name].is_primary = true;
+                        this.columns[constraint.column_name].is_primary = true;
                         constraint_found = true;
-                        self.primary.push(constraint.column_name);
-                        self.defaultIds.push(`${constraint.column_name} = %L`);
+                        this.primary.push(constraint.column_name);
                     }
                     if (constraint.constraint_type == KEY_FOREIGN) {
-                        self.columns[constraint.column_name].is_foreign = true;
+                        this.columns[constraint.column_name].is_foreign = true;
                         constraint_found = true;
                     }
                 });
-                if (!constraint_found) console.log(`[WARNING] No constraints on table ${self.name}`);
-                self.defaultIds = self.defaultIds.length ? ` AND ${self.defaultIds.join(' AND ')}` : '';
+                if (!constraint_found) console.log(`[WARNING] No constraints on table ${this.name}`);
                 next();
             },
 
@@ -117,22 +217,24 @@ class Table {
              * Initialise filters and queries
              * @param next
              */
-            function(next) {
+            (next) => {
                 //Set default filters for all table columns
                 const defaultFilters = {};
                 const defaultFiltersAPI = {};
-                self.non_primary = [];
+                this.non_primary = [];
 
-                _.each(self.columns, function(props, column) {
-                    if (self.primary.indexOf(column) === -1) {
-                        self.non_primary.push(column);
+                _.each(this.columns, (props, column) => {
+                    if (this.primary.indexOf(column) === -1) {
+                        this.non_primary.push(column);
                     }
 
-                    var columnDefinition = `${self.aliasClause}${column}`;
+                    var columnDefinition = `${this.aliasClause}${column}`;
                     defaultFilters[column] = ` ${columnDefinition} = %L`;
                     defaultFilters[`${column}s`] = ` ${columnDefinition} IN (%L)`;
+                    this.falseIfEmpty.add(`${column}s`);
                     defaultFilters[`not_${column}`] = ` ${columnDefinition} <> %L`;
                     defaultFilters[`not_${column}s`] = ` ${columnDefinition} NOT IN (%L)`;
+                    this.trueIfEmpty.add(`not_${column}s`);
 
                     defaultFiltersAPI[column] = {description: `Filter by ${column} equal to filter value`};
                     defaultFiltersAPI[`${column}s`] = {
@@ -145,14 +247,14 @@ class Table {
                         toArray: true
                     };
 
-                    if (self.nullable.has(column)) {
+                    if (this.nullable.has(column)) {
                         defaultFilters[`null_${column}`] = ` ${columnDefinition} IS NULL`;
                         defaultFilters[`not_null_${column}`] = ` ${columnDefinition} IS NOT NULL`;
                         defaultFiltersAPI[`null_${column}`] = {description: `Filter by NULL ${column} entries`};
                         defaultFiltersAPI[`not_null_${column}`] = {description: `Filter by not NULL ${column} entries`};
                     }
 
-                    if (self.numeric.has(column)) {
+                    if (this.numeric.has(column)) {
                         defaultFilters[`${column}_gt`] = ` ${columnDefinition} > %L`;
                         defaultFilters[`${column}_gte`] = ` ${columnDefinition} >= %L`;
                         defaultFilters[`${column}_lt`] = ` ${columnDefinition} < %L`;
@@ -165,45 +267,55 @@ class Table {
                     }
                 });
 
-                _.each(self.filters, function(filter, filter_key){
+                _.each(this.filters, (filter, filter_key) => {
                     defaultFiltersAPI[filter_key] = {description: filter.description || `Custom ${filter_key} filter`};
                 });
 
                 let recursiveFilters = {};
                 let basicFilters = {};
-                _.each(defaultFilters, function(defaultFilter, key){
-                    recursiveFilters[key] = {where: `AND (${defaultFilter} OR (${self.aliasClause}${key} IS NULL AND depth > 1))`};
-                    basicFilters[key] = {where: `AND ${defaultFilter}`};
+                _.each(defaultFilters, (defaultFilter, key) => {
+                    recursiveFilters[key] = {where: `(${defaultFilter} OR (${this.aliasClause}${key} IS NULL AND depth > 1))`};
+                    basicFilters[key] = {where: defaultFilter};
                 });
+
+                basicFilters['columns'] = {columns: '%I'};
+                basicFilters['values'] = {values: '%L'};
+                basicFilters['update'] = {update: '%TO BE REPLACED BY INJECTOR%'};
+                basicFilters['limit'] = {limit: '%TO BE REPLACED BY INJECTOR%'};
+                basicFilters['order'] = {order: '%TO BE REPLACED BY INJECTOR%'};
 
                 //Use class filters (if any) with default filters fallback
-                self.filters = _.defaults(self.filters, basicFilters);
-                self.filtersRecursive = _.defaults(self.filtersRecursive, recursiveFilters);
-                self.filtersAPI = defaultFiltersAPI;
+                this.filters = _.defaults(this.filters, basicFilters);
+                this.filtersRecursive = _.defaults(this.filtersRecursive, recursiveFilters);
+                this.filtersAPI = defaultFiltersAPI;
 
-                var aliasDefinition = self.alias ? ` AS ${self.alias}` : '';
+                var aliasDefinition = this.alias ? ` AS ${this.alias}` : '';
 
                 //If the queries are already defined in model class, we use them instead of default queries
-                self.queries = _.defaults(self.queries, {
-                    row: `SELECT ${self.aliasClause}*{{select}} FROM "${self.name}"${aliasDefinition}{{join}} WHERE true{{whereClause}} {{where}} {{group}} {{having}} {{order}} LIMIT 1`,
-                    list: `SELECT ${self.aliasClause}*{{select}} FROM "${self.name}"${aliasDefinition}{{join}} WHERE true{{where}} {{group}} {{having}} {{order}} {{limit}}`,
-                    insert: `INSERT INTO "${self.name}"${aliasDefinition} ({{columns}}) VALUES ({{values}}){{conflict}}{{returning}}`,
-                    update: `UPDATE "${self.name}"${aliasDefinition} SET {{columns}} WHERE true {{where}}`,
-                    del: `DELETE FROM "${self.name}"${aliasDefinition} WHERE true ${self.defaultIds}`,
-                    delWhere: `DELETE FROM "${self.name}"${aliasDefinition} WHERE true {{where}}`,
-                    count: `SELECT COUNT(*) as cnt FROM "${self.name}"${aliasDefinition} WHERE true {{where}}`
+                this.queries = _.defaults(this.queries, {
+                    select: `SELECT ${this.aliasClause}*{{select}} {%distinct%} FROM "${this.name}"${aliasDefinition}{{join}} WHERE true{{where}} {{group}} {{having}} {{order}} {{limit}}`,
+                    insert: `INSERT INTO "${this.name}"${aliasDefinition} ({{columns}}) VALUES ({{values}}){%conflict%}{%returning%}`,
+                    update: `UPDATE "${this.name}"${aliasDefinition} SET {{update}} WHERE true {{where}} {{limit}}`,
+                    del: `DELETE FROM "${this.name}"${aliasDefinition} WHERE true {{where}} {%returning%}`,
+                    count: `SELECT COUNT(*) as cnt FROM "${this.name}"${aliasDefinition} WHERE true {{where}}`
                 });
 
-                self.persistentAssoc = self.persistentAssoc || {};
-
-                self.conflict = {
-                    do_nothing: 'ON CONFLICT DO NOTHING',
-                    do_update: `ON CONFLICT (${self.primary.join(',')}) DO UPDATE SET (${self.non_primary.join(', ')}) = (EXCLUDED.${self.non_primary.join(', EXCLUDED.')})`
-                };
-
-                self.returning = self.primary.length ? ` RETURNING ${self.primary.join(', ')}` : '';
+                this.persistentAssoc = this.persistentAssoc || {};
 
                 next();
+            },
+            (next) => {
+                const injectorsPath = path.join(path.dirname(module.filename), '..', 'injectors');
+                fs.readdir(injectorsPath, (err, injectors) => {
+                    if (err) return next(err);
+                    _.each(injectors, (injector) => {
+                        if (path.extname(injector) == JS_EXTENTION) {
+                            const InjectorClass = require(path.join(injectorsPath, injector));
+                            this.injectors[path.basename(injector, JS_EXTENTION)] = new InjectorClass(this);
+                        }
+                    });
+                    next();
+                });
             }
         ], callback);
 
@@ -216,15 +328,287 @@ class Table {
      * @return {Object}
      */
     defaultFilters(filters, exclude = []) {
-        let self = this;
         let excludeFilters = [];
         _.each(exclude, function(excludeColumn){
             excludeFilters = _.concat(excludeFilters,
                     [excludeColumn, `${excludeColumn}s`, `not_${excludeColumn}`,
                     `not_${excludeColumn}s`, `null_${excludeColumn}`, `not_null_${excludeColumn}`]);
         });
-        return _.defaultsDeep(filters, _.omit(self.filtersAPI, excludeFilters));
+        return _.defaultsDeep(filters, _.omit(this.filtersAPI, excludeFilters));
     };
+
+    /**
+     * Unfold filter shortcuts into full filters
+     * @param filters
+     * @return {*}
+     */
+    static unfoldFilters(filters) {
+        if (_.isArray(filters)) return _.map(filters, Table.unfoldFilters);
+
+        _.each(filters, function(value, key) {
+            if (NON_FOLDABLE_FILTERS.indexOf(key) == -1 && _.isObject(value) && !_.isArray(value)) {
+                _.each(value, function(folded_value, folded_key){
+                    if (FOLDED_CLAUSES[folded_key]) {
+                        filters[_f(FOLDED_CLAUSES[folded_key], key)] = folded_value;
+                    }
+                });
+                delete filters[key];
+            }
+        });
+
+        return filters;
+    }
+
+    /**
+     * Prepare injections to be inserted into the query template
+     * @param filters
+     * @return {{}}
+     */
+    normalizeInjections(filters) {
+        //Perform additional normalization if we have OR-object
+        if (_.isArray(filters)) {
+            const preNormalizedInjections =  _.map(filters, (filter) => this.normalizeInjections(filter));
+            const normalizedInjections = {};
+            _.each(preNormalizedInjections, function(injectionBlock){
+                 _.each(injectionBlock, function(injection, key) {
+                    if (NON_GROUPABLE_FILTERS.indexOf(key) == -1) {
+                        normalizedInjections[key] = _.defaults(normalizedInjections[key], injection);
+                    } else {
+                        if (!normalizedInjections[key]) normalizedInjections[key] = [];
+                        normalizedInjections[key].push(injection);
+                    }
+                 });
+            });
+            return normalizedInjections;
+        }
+
+        const actualFiltersKeys = _.intersection(_.keys(filters, _.keys(this.filters)));
+
+        const normalizedInjections = {};
+
+        let filtersToUse = this.filters;
+        if (filters.$recursive) filtersToUse = _.defaults(this.filtersRecursive, filtersToUse);
+
+        _.each(_.pick(filtersToUse, actualFiltersKeys), (injections, filter)=>{
+            _.each(injections, (injection, tag) => {
+                if (_.isUndefined(normalizedInjections[tag])) normalizedInjections[tag] = {};
+                normalizedInjections[tag][filter] = this.injectors[tag].format(injection, filters[filter], filter);
+            });
+        });
+        return normalizedInjections;
+    }
+
+    /**
+     * Compose query out of provided filters and query template
+     * @param query
+     * @param filters
+     * @return {string|XML|void|*}
+     */
+    composeQuery(query, filters) {
+
+        filters = Table.unfoldFilters(filters);
+
+        const normalizedInjections = this.normalizeInjections(filters);
+        const queryTags = query.match(OPTIONAL_TAG_REGEXP);
+        const appliableInjections = _.pickBy(normalizedInjections, (value, key) => queryTags.indexOf(`{{${key}}}`) > -1);
+
+        _.each(appliableInjections, (injection, tag) => {
+            query = this.injectors[tag].inject(query, appliableInjections[tag], filters, tag);
+        });
+
+        const forcedTags = [];
+        let match;
+        while (match = FORCED_TAG_REGEXP.exec(query)) {
+            forcedTags.push(match[FORCED_TAG_REGEXP_POSITION]);
+        }
+
+        _.each(forcedTags, (tag) => {
+            query = this.injectors[tag].force(query, filters, tag);
+        });
+
+        // Remove unused tags
+        query = query.replace(ANY_TAG_REGEXP,"");
+
+        return query;
+    };
+
+    /**
+     * Perform custom filtered query
+     * @param {String} sql
+     * @param {Array} params
+     * @param {Object} filters
+     * @param {Function} callback
+     */
+    filteredQuery(sql, params = [], filters, callback) {
+        sql = format(sql, ...params);
+        return this.db.query(this.composeQuery(this.queries.select, filters), callback);
+    }
+
+    /**
+     * Select one row as an object
+     * @param {int|String|Object} [filters]
+     * @param {Function} callback
+     */
+    row(filters, callback) {
+        if (_.isFunction(filters)) {
+            callback = filters;
+            filters = {};
+        }
+        if (!_.isFunction(callback)) throw new Error("Callback must be a function");
+        if (!_.isObject(filters)) filters = {[this.primary[0]]: filters};
+        filters.limit = [1];
+
+        this.db.row(this.composeQuery(this.queries.select, filters),
+            (err, result) => {
+                if (err) return callback(err);
+                if (_.isEmpty(result) && !filters.$allowEmpty) return callback({error: `No ${this.name} found for identifier(s) ${filters}`, code: httpStatus.NOT_FOUND , filters: filters});
+                callback(null, result);
+            });
+    };
+
+    /**
+     * Select data by query as an array of objects
+     * @param {Object} filters
+     * @param {Function} callback
+     */
+    list(filters, callback) {
+        if (_.isFunction(filters)) {
+            callback = filters;
+            filters = {};
+        }
+        if (!_.isFunction(callback)) throw new Error("Callback must be a function");
+        return this.db.query(this.composeQuery(this.queries.select, filters), callback);
+    };
+
+
+    /**
+     * Insert
+     * @param {Object} data
+     * @param {Object} [filters]
+     * @param {Function} callback
+     */
+    insert(data, filters, callback) {
+        if (_.isFunction(filters)) {
+            callback = filters;
+            filters = {};
+        }
+        const relatedData = _.pick(data, _.keys(this.columns));
+        filters = _.defaults(filters, {
+            columns: _.keys(relatedData),
+            values: _.values(this._preprocess(relatedData, _.concat(filters.$preprocess || [], this.$preprocess)))
+        });
+
+        return this.db.row(this.composeQuery(this.queries.insert, filters), (err, res) => {
+            if (err) return callback(err);
+            callback(null, res);
+            this.updatePersistent(this.persistentUpdateCallback);
+        });
+    };
+
+    /**
+     * Update
+     * @param data
+     * @param filters
+     * @param callback
+     */
+    update(data, filters, callback) {
+
+        if (_.isFunction(filters)) {
+            callback = filters;
+            filters = {};
+        }
+
+        data = this._preprocess(data, _.concat(filters.$preprocess || [], this.$preprocess));
+
+        if (_.isString(filters.$update_by)) filters.$update_by = [filters.$update_by];
+        const update_by_columns = filters.$update_by || this.primary;
+        const update_data = _.pick(data, _.difference(_.keys(this.columns), update_by_columns));
+
+        if (_.isArray(filters)) {
+            filters.push(_.pick(data, update_by_columns));
+            filters.push({update: update_data})
+        }
+        else {
+            filters = _.defaults(filters, _.pick(data, update_by_columns));
+            filters.update = update_data;
+        }
+
+        return this.db.query(this.composeQuery(this.queries.update, filters), (err) => {
+            if (err) return callback(err);
+            callback(null, {update: 'success'});
+            this.updatePersistent(this.persistentUpdateCallback);
+        });
+    };
+
+    /**
+     * Simple deletion by primary ids
+     * @param {Object} filters
+     * @param callback
+     */
+    del(filters, callback) {
+
+        if (!_.isFunction(callback)) throw new Error("Callback must be a function");
+        if (_.isEmpty(filters)) return callback({error: "Can't delete with empty filters"});
+        if (!_.isObject(filters)) filters = {[this.primary[0]]: filters};
+
+        if (_.isEmpty(filters)) callback({error: 'Deletion with empty filter must be forced', code: httpStatus.UNPROCESSABLE_ENTITY});
+
+        return this.db.row(this.composeQuery(this.queries.del, filters), (err, res) => {
+            if (err) return callback(err);
+            callback(null, res);
+            this.updatePersistent(this.persistentUpdateCallback);
+        });
+    };
+
+    /**
+     * Return the number of records matching the request. Count all records by default
+     * @param filters
+     * @param callback
+     */
+    count(filters, callback) {
+        if (_.isFunction(filters)) {
+            callback = filters;
+            filters = {};
+        }
+
+        this.db.query(this.composeQuery(this.queries.count, filters), (err, count) => {
+            if (err) return callback(err);
+            else callback(null, count[0]['cnt']);
+        });
+    };
+
+    /**
+     * Returns true if query
+     *
+     * @param filters
+     * @param callback
+     */
+    exists(filters, callback) {
+        if (_.isEmpty(filters)) return callback({error: `Empty request for ${this.name} entry existance check`, code: httpStatus.UNPROCESSABLE_ENTITY});
+        this.count(filters, function(err, count) {
+            callback(err, count > 0);
+        });
+    };
+
+    /**
+     * Transforms data according to crud options
+     *
+     * @param data
+     * @param preprocessors
+     */
+    _preprocess(data, preprocessors) {
+        if (!_.isObject(preprocessors) || preprocessors.length == 0) {
+            return data;
+        }
+        _.each(preprocessors, function(preprocessor) {
+            _.each(preprocessor.fields, function(field) {
+                if (!_.isUndefined(data[field])) {
+                    data[field] = preprocessor.fn(data[field]);
+                }
+            });
+        });
+        return data;
+    }
 
     /**
      * Prevent persistent fields updates from being fired
@@ -301,60 +685,10 @@ class Table {
 
                                         function(rows, persistent_next_step) {
                                             let pdata = {}; //persistent data
-                                            switch (persistent.mode) {
-                                                case self.PERSISTENT_MODE_SIMPLE:
-                                                    pdata = rows;
-                                                    break;
-                                                case self.PERSISTENT_MODE_ASSOC:
-                                                    if (!_.isString(persistent.collect_by)) {
-                                                        console.log(`Incorrect persistent description for ${self.name}: ${key} (collect_by field is missing or not a string):`);
-                                                        return persistent_next_step({error: `Incorrect persistent description for ${self.name}: ${key} (collect_by field is missing or not a string):`, persistent: persistent});
-                                                    }
-                                                    _.each(rows, function(row){
-                                                        if (_.isUndefined(row[persistent.collect_by])) {
-                                                            console.log(`WARNING: ${self.name}: ${key} has no entry for collect_by: ${persistent.collect_by}`);
-                                                        } else {
-                                                            pdata[row[persistent.collect_by]] = row;
-                                                        }
-                                                    });
-                                                    break;
-                                                case self.PERSISTENT_MODE_ARRAY_BUNDLE:
-                                                    if (!_.isString(persistent.collect_by)) {
-                                                        console.log(`Incorrect persistent description for ${self.name}: ${key} (collect_by field is missing or not a string):`);
-                                                        return persistent_next_step({error: `Incorrect persistent description for ${self.name}: ${key} (collect_by field is missing or not a string):`, persistent: persistent});
-                                                    }
-                                                    _.each(rows, function(row){
-                                                        if (_.isUndefined(row[persistent.collect_by])) {
-                                                            console.log(`WARNING: ${self.name}: ${key} has no entry for collect_by: ${persistent.collect_by}`);
-                                                        } else {
-                                                            if (_.isUndefined(pdata[row[persistent.collect_by]])) pdata[row[persistent.collect_by]] = [];
-                                                            pdata[row[persistent.collect_by]].push(row);
-                                                        }
-                                                    });
-                                                    break;
-                                                case self.PERSISTENT_MODE_ARRAY_KEY:
-                                                    if (!_.isString(persistent.collect_by)) {
-                                                        console.log(`Incorrect persistent description for ${self.name}: ${key} (collect_by field is missing or not a string):`);
-                                                        return persistent_next_step({error: `Incorrect persistent description for ${self.name}: ${key} (collect_by field is missing or not a string):`, persistent: persistent});
-                                                    }
-                                                    if (!_.isString(persistent.collect_from)) {
-                                                        console.log(`Incorrect persistent description for ${self.name}: ${key} (collect_from field is missing or not a string):`);
-                                                        return persistent_next_step({error: `Incorrect persistent description for ${self.name}: ${key} (collect_from field is missing or not a string):`, persistent: persistent});
-                                                    }
-                                                    _.each(rows, function(row){
-                                                        if (_.isUndefined(row[persistent.collect_by])) {
-                                                            console.log(`WARNING: ${self.name}: ${key} has no entry for collect_by: ${persistent.collect_by}`);
-                                                        } else {
-                                                            if (_.isUndefined(row[persistent.collect_from])) {
-                                                                console.log(`WARNING: ${self.name}: ${key} has no entry for collect_by: ${persistent.collect_from}`);
-                                                            } else {
-                                                                if (_.isUndefined(pdata[row[persistent.collect_by]])) pdata[row[persistent.collect_by]] = [];
-                                                                pdata[row[persistent.collect_by]].push(row[persistent.collect_from]);
-                                                            }
-                                                        }
-                                                    });
-                                                    break;
-                                                default:
+
+                                            if (_.isFunction(self.persistentHandlers[persistent.mode])) {
+                                                pdata = self.persistentHandlers[persistent.mode](persistent, rows, self);
+                                            }  else {
                                                 console.log(`Incorrect persistent description for ${self.name}: ${key} (unknown mode: "${persistent.mode}"):`);
                                                 return persistent_next_step({error: `Incorrect persistent description for ${self.name}: ${key} (unknown mode: "${persistent.mode}"):`, persistent: persistent});
                                             }
@@ -390,390 +724,10 @@ class Table {
         } else callback();
     };
 
-    /**
-     * Inject sorting into the request
-     * @param sql
-     * @param filters
-     * @returns {*}
-     */
-     injectSort(sql, filters) {
-        const self = this;
-        if (filters['order']) {
-             var sort = filters['order'].split(',');
-             if (_.isArray(sort)) {
-                 const preparedSort = [];
-                 _.each(sort, function(field){
-                        const splitted = field.split(':');
-                        let sort_column = splitted[0].toLowerCase();
-                        // if (_.isUndefined(self.columns[sort_column])) {
-                        //     console.log(`Invalid sort field ${sort_column}`);
-                        //     return;
-                        // }
-                        let sort_order = splitted[1] ? splitted[1].toUpperCase() : ASC;
-                        if (POSSIBLE_DIRECTIONS.has(sort_order)) {
-                            preparedSort.push(`${sort_column} ${sort_order}`);
-                        } else {
-                            console.log(`Invalid direction ${sort_order}`);
-                        }
-                 });
-                 if (preparedSort.length) {
-                     sql = sql.replace('{{order}}', ` ORDER BY ${preparedSort.join(', ')}`);
-                 }
-             } else throw "Failed to parse order filter"
-         }
-         return sql;
-     };
-
-    /**
-     * Inject limit into the request
-     * @param sql
-     * @param filters
-     */
-    injectLimit(sql, filters) {
-        const self = this;
-        if (filters['limit']) {
-            const limit = filters['limit'];
-            if (_.isArray(limit)) {
-                for (var i = 0; i < limit.length; i++) {
-                    limit[i] = parseInt(limit[i]);
-                }
-                limit[0] = Math.min(self.topLimit, limit[0]);
-                if (limit.length == 1) sql = sql.replace('{{limit}}', ` LIMIT ${limit[0]}`);
-                else if (limit.length == 2) sql = sql.replace('{{limit}}', ` LIMIT ${limit[0]} OFFSET ${limit[1]}`);
-                else throw "Incorrect number of limit params (1 or 2 expected)"
-            } else if (limit === parseInt(limit)) {//limit is int
-                sql = sql.replace('{{limit}}', ` LIMIT ${parseInt(limit)}`);
-            } else throw "Failed to parse limit filter"
-        }
-        return sql;
-    };
-
-    /**
-     * Inject RETURNING statement into request if it's required
-     * @param {String} sql
-     * @returns {string}
-     */
-    injectReturning(sql) {
-        return sql.replace('{{returning}}', this.returning);
+    persistentUpdateCallback(err) {
+        if (err) console.log('\nERROR: persistent fields update failed for ', this.name, 'with error:\n' + err);
     }
 
-
-    injectConflict(sql, mode) {
-        let conflict = '';
-        if (mode) {
-            if (this.conflict[mode]) {
-                conflict = ' ' + this.conflict[mode];
-            } else {
-                console.log(`WARNING: non-existing conflict resolve mode ${mode}`);
-            }
-        }
-        return sql.replace('{{conflict}}', conflict);
-    }
-
-    /**
-     * Select one row as an object
-     * @param {int|String|Object} ids
-     * @param {Object} [filters]
-     * @param {Function} callback
-     */
-    row(ids, filters, callback) {
-        const self = this;
-        if (_.isFunction(filters)) {
-            callback = filters;
-            filters = {};
-        }
-        if (!_.isFunction(callback)) throw new Error("Callback must be a function");
-
-        var whereClause = "";
-        if (!_.isObject(ids)) {
-            whereClause = ` AND ${self.aliasClause}${self.primary[0]} = %L`;
-        } else {
-            var fields = [];
-            var values = _.values(ids);
-            _.each(ids, function(value, key) {
-                if (self.columns[key]) {
-                    fields.push(` AND ${self.aliasClause}${key} = %L`);
-                } else {
-                    if (self.filters[key]) {
-                        filters[key] = value;
-                    }
-                }
-
-            });
-            ids = values;
-            whereClause = fields.join(" ");
-        }
-
-        var columns = [];
-        _.each(self.columns, function(column, name) {
-            columns.push(`${name}`);
-        });
-        var sql = self.queries.row
-            .replace('{{whereClause}}', whereClause);
-
-        sql = self.db.injectFilters(sql, filters, self.filters);
-        self.db.row(sql, ids, function(err, row) {
-            if (err) return callback(err);
-            if (_.isEmpty(row)) return callback({error: `No ${self.name} found for identifier(s) ${ids}`, code: httpStatus.NOT_FOUND , ids: ids, filters: filters});
-            callback(null, row);
-        });
-    };
-
-    /**
-     * Select data by query as an array of objects
-     * @param {Object} filters
-     * @param {Function} callback
-     */
-    list(filters, callback) {
-        const self = this;
-        if (_.isFunction(filters)) {
-            callback = filters;
-            filters = {};
-        } else {
-            if (!_.isObject(filters) && !_.isArray(filters)) {
-                console.log("WARNING. Invalid filters provided for " + self.name + ".list(). Object required");
-                console.log(filters);
-                filters = {};
-            }
-        }
-        if (!_.isFunction(callback)) throw new Error("Callback must be a function");
-
-        var columns = [];
-        _.each(self.columns, function(column, name) {
-            columns.push(`${self.name}.${name}`);
-        });
-
-        var sql = self.queries.list.replace('{{columns}}', columns.join(', '));
-        return self.filteredQuery(sql, null, filters, callback);
-    };
-
-
-    static unfoldFilters(filters) {
-        const unfold = {
-            'eq': '%s',
-            'neq': 'not_%s',
-            'in': '%ss',
-            'nin': '%ss',
-            'null': 'null_%s',
-            'nnull': 'not_null_%s',
-            'gt': '%s_gt',
-            'gte': '%s_gte',
-            'lt': '%s_lt',
-            'lte': '%s_lte'
-        };
-        _.each(filters, function(value, key) {
-            if (_.isObject(value) && !_.isArray(value)) {
-                _.each(value, function(folded_value, folded_key){
-                    if (unfold[folded_key]) {
-                        filters[_f(unfold[folded_key], key)] = folded_value;
-                    }
-                });
-                delete filters[key];
-            }
-        });
-
-        return filters;
-    }
-
-    /**
-     * Perform custom filtered query
-     * @param {String} sql
-     * @param {Array} params
-     * @param {Object} filters
-     * @param {Function} callback
-     */
-    filteredQuery(sql, params = [], filters, callback) {
-        const self = this;
-        filters = Table.unfoldFilters(filters);
-        sql = self.injectLimit(sql, filters);
-        sql = self.injectSort(sql, filters);
-        sql = self.db.injectFilters(sql, filters, self.filters);
-        return self.db.query(sql, params, callback);
-    }
-
-
-    /**
-     * Perform custom filtered query with recursive autofilters
-     * @param {String} sql
-     * @param {Array} params
-     * @param {Object} filters
-     * @param {Function} callback
-     */
-    filteredQueryRecursive(sql, params = [], filters, callback) {
-        const self = this;
-        filters = Table.unfoldFilters(filters);
-        sql = self.injectLimit(sql, filters);
-        sql = self.injectSort(sql, filters);
-        sql = self.db.injectFilters(sql, filters, self.filtersRecursive);
-        return self.db.query(sql, params, callback)
-    }
-
-    /**
-     * Insert
-     * @param {Object} data
-     * @param {Object} [options]
-     * @param {Function} callback
-     */
-    insert(data, options, callback) {
-        const self = this;
-
-        if (_.isFunction(options)) {
-            callback = options;
-            options = {};
-        }
-
-        options = _.defaults(options, {preprocess: self.preprocess});
-
-        let insert_data = _.pick(data, _.keys(self.columns));
-        insert_data = self._transform(insert_data, options.preprocess);
-
-        let sql = self.queries.insert
-            .replace('{{columns}}', '%I')
-            .replace('{{values}}', '%L');
-
-        sql = self.injectReturning(sql);
-        sql = self.injectConflict(sql, options.conflict);
-
-
-        return self.db.row(sql, [_.keys(insert_data), _.values(insert_data)], function(err, res) {
-            if (err) callback(err);
-            else {
-                callback(null, res);
-                self.updatePersistent(function(err) {
-                    if (err) console.log('\nERROR: persistent fields update failed for ', self.name, 'with error:\n' + err);
-                });
-            }
-        });
-    };
-
-    /**
-     * Update
-     * @param data
-     * @param options
-     * @param callback
-     */
-    update(data, options, callback) {
-        const self = this;
-        const valuesStr = [];
-        const whereStr = [];
-
-        if (_.isFunction(options)) {
-            callback = options;
-            options = {};
-        }
-
-        options = _.defaults(options, {preprocess: self.preprocess});
-
-        if (_.isString(options.update_by)) options.update_by = [options.update_by];
-        const update_by_columns = options.update_by || self.primary;
-        let update_data = _.pick(data, _.difference(_.keys(self.columns), _.concat(self.primary, options.update_by)));
-        update_data = self._transform(update_data, options.preprocess);
-
-        _.each(update_data, function(value, column) {
-            valuesStr.push(format('%I = %L', column, value));
-        });
-
-        for (const update_by_column of update_by_columns) {
-            whereStr.push(format('%I = %L', update_by_column, data[update_by_column]));
-        }
-
-        let sql = self.queries.update
-            .replace('{{columns}}', valuesStr.join(', '))
-            .replace('{{where}}', ' AND ' + whereStr.join(' AND '));
-
-        return self.db.query(sql, function(err) {
-            if (err) callback(err);
-            else {
-                callback(null, { update: 'success' });
-                self.updatePersistent(function(err) {
-                    if (err) console.log('\nERROR: persistent fields update failed for ', self.name, 'with error:\n' + err);
-                });
-            }
-        });
-    };
-
-    /**
-     * Simple deletion by primary ids
-     * @param ids
-     * @param callback
-     */
-    del(ids, callback) {
-        const self = this;
-        var sql = self.queries.del;
-        var queryIds = [];
-        if (!_.isObject(ids)) {
-            if (self.primary.length == 1) {
-                queryIds = ids;
-            } else callback({ Error: "Incorrect delete id" });
-        } else {
-            var whereReplace = '';
-            _.each(ids, function(value, column) {
-                whereReplace += ' AND ' + column + (_.isArray(value) ? ' IN (%L)' : ' = %L');
-                queryIds.push(value);
-            });
-            sql = self.queries.delWhere.replace('{{where}}', whereReplace);
-        }
-        return self.db.query(sql, queryIds, function(err, res) {
-            if (err) return callback(err);
-
-            callback(null, { delete: 'success' });
-            self.updatePersistent(function(err) {
-                if (err) console.log('\nERROR: persistent fields update failed for ', self.name, 'with error:\n' + err);
-            });
-
-        });
-    };
-
-    /**
-     * Return the number of records matching the request. Count all records by default
-     * @param filters
-     * @param callback
-     */
-    count(filters, callback) {
-        const self = this;
-        if (_.isFunction(filters)) {
-            callback = filters;
-            filters = {};
-        }
-        var sql = self.db.injectFilters(self.queries.count, filters, self.filters);
-        self.db.query(sql, function(err, count) {
-            if (err) callback(err);
-            else callback(null, count[0]['cnt']);
-        });
-    };
-
-    /**
-     * Returns true if query
-     *
-     * @param filters
-     * @param callback
-     */
-    exists(filters, callback) {
-        if (_.isEmpty(filters)) return callback({error: `Empty request for ${this.name} entry existance check`, code: httpStatus.UNPROCESSABLE_ENTITY});
-        this.count(filters, function(err, count) {
-            callback(err, count > 0);
-        });
-    };
-
-    /**
-     * Transforms data according to crud options
-     *
-     * @param data
-     * @param options
-     */
-    _transform(data, options) {
-        if (_.isUndefined(options.transform) || !_.isArray(options.transform) || options.transform.length == 0) {
-            return data;
-        }
-        _.each(options.transform, function(transform) {
-            _.each(transform.fields, function(field) {
-                if (!_.isUndefined(data[field])) {
-                    data[field] = transform.fn(data[field]);
-                }
-            });
-        });
-        return data;
-    }
 }
 
 module.exports = Table;
