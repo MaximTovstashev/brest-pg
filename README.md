@@ -343,6 +343,10 @@ Char case is arbitrary
 
 ## 4 Changelist
 
+### 0.0.14-1
+
+- Upgraded 'pg' to 6.0.3
+
 ### 0.1.0
 
 - Table.row now accepts only two parameters: filters and callback. "filters" can be a single Number/String value
