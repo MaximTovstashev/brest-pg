@@ -343,6 +343,10 @@ Char case is arbitrary
 
 ## 4 Changelist
 
+### 0.1.2
+
+- Custom "order" filter can be built to accept "direction-only" params
+
 ### 0.1.1
 
 - Fixed Controller class to comply with changes in Table

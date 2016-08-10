@@ -17,24 +17,31 @@ class OrderInjector extends BasicInjector {
      * @param {Array|String} order
      * @return {*}
      */
-    format(injection, order) {
+    format(injection, order, key) {
         order = order.split(',');
         if (_.isArray(order)) {
             const preparedSort = [];
+            let customSort = false;
             _.each(order, (field) => {
                 const splitted = field.split(':');
                 const sort_column = splitted[0].toLowerCase();
-                if (_.isUndefined(this.table.columns[sort_column])) {
-                    console.log(`Invalid sort field ${sort_column}`);
-                    return '';
-                }
-                const sort_order = splitted[1] ? splitted[1].toUpperCase() : ASC;
-                if (POSSIBLE_DIRECTIONS.has(sort_order)) {
-                    preparedSort.push(`${sort_column} ${sort_order}`);
+                if (POSSIBLE_DIRECTIONS.has(splitted[0].toUpperCase())) {
+                    customSort = format(injection, splitted);
+                    return false;
                 } else {
-                    console.log(`Invalid direction ${sort_order}`);
+                    if (_.isUndefined(this.table.columns[sort_column])) {
+                        console.log(`Invalid sort field ${sort_column}`);
+                        return '';
+                    }
+                    const sort_order = splitted[1] ? splitted[1].toUpperCase() : ASC;
+                    if (POSSIBLE_DIRECTIONS.has(sort_order)) {
+                        preparedSort.push(`${sort_column} ${sort_order}`);
+                    } else {
+                        console.log(`Invalid direction ${sort_order}`);
+                    }
                 }
             });
+            if (customSort) return customSort;
             if (preparedSort.length) {
                 return ` ORDER BY ${preparedSort.join(', ')}`;
             }
