@@ -19,12 +19,11 @@ class Controller {
 
     /**
      * Default row request
-     * @param {Number|Object} ids
-     * @param {Object} [filters] Filters object
+     * @param {Number|String|Object} [filters] Filters object
      * @param {Function} callback callback function
      */
-    row(ids, filters, callback) {
-        this.table.row(ids, filters, callback);
+    row(filters, callback) {
+        this.table.row(filters, callback);
     }
 
     /**
@@ -39,30 +38,30 @@ class Controller {
     /**
      * Default insert request
      * @param {Object} data
-     * @param {Object} [options]
+     * @param {Object} [filters]
      * @param {Function} callback
      */
-    insert(data, options, callback) {
-        this.table.insert(data, options, callback);
+    insert(data, filters, callback) {
+        this.table.insert(data, filters, callback);
     }
 
     /**
      * Default update request
      * @param {Object} data
-     * @param {Object} [options]
+     * @param {Object} [filters]
      * @param {Function} callback
      */
-    update(data, options, callback) {
-        this.table.update(data, options, callback);
+    update(data, filters, callback) {
+        this.table.update(data, filters, callback);
     }
 
     /**
      * Default delete request
-     * @param {Number|Object} ids
+     * @param {Number|Object} filters
      * @param callback
      */
-    del(ids, callback) {
-        this.table.del(ids, callback);
+    del(filters, callback) {
+        this.table.del(filters, callback);
     }
 
 

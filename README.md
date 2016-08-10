@@ -343,9 +343,9 @@ Char case is arbitrary
 
 ## 4 Changelist
 
-### 0.0.14-1
+### 0.1.1
 
-- Upgraded 'pg' to 6.0.3
+- Fixed Controller class to comply with changes in Table
 
 ### 0.1.0
 
@@ -361,6 +361,9 @@ Char case is arbitrary
 - Removed "temp fix" for custom string in sorting order: use custom filters instead!
 - Lot's of internal refactoring
 
+### 0.0.14-1
+
+- Upgraded 'pg' to 6.0.3
 
 ### 0.0.14
 
