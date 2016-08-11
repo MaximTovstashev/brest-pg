@@ -343,14 +343,14 @@ Char case is arbitrary
 
 ## 4 Changelist
 
-### 0.1.3
-
-- Fixed: incorrect 'DISTINCT' position
-
-### 0.1.3
+### 0.1.4
 
 - filters are no longer modified within Table methods 
 - alias is added to "order" clause
+
+### 0.1.3
+
+- Fixed: incorrect 'DISTINCT' position
 
 ### 0.1.2
 
