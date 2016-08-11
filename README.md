@@ -343,6 +343,11 @@ Char case is arbitrary
 
 ## 4 Changelist
 
+### 0.1.3
+
+- filters are no longer modified within Table methods 
+- alias is added to "order" clause
+
 ### 0.1.2
 
 - Custom "order" filter can be built to accept "direction-only" params

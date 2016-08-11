@@ -17,7 +17,7 @@ class OrderInjector extends BasicInjector {
      * @param {Array|String} order
      * @return {*}
      */
-    format(injection, order, key) {
+    format(injection, order) {
         order = order.split(',');
         if (_.isArray(order)) {
             const preparedSort = [];
@@ -35,7 +35,7 @@ class OrderInjector extends BasicInjector {
                     }
                     const sort_order = splitted[1] ? splitted[1].toUpperCase() : ASC;
                     if (POSSIBLE_DIRECTIONS.has(sort_order)) {
-                        preparedSort.push(`${sort_column} ${sort_order}`);
+                        preparedSort.push(`${this.table.aliasClause}${sort_column} ${sort_order}`);
                     } else {
                         console.log(`Invalid direction ${sort_order}`);
                     }
