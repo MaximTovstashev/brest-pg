@@ -1,5 +1,5 @@
 # brest-pg
-PostgreSQL library for Brest. 
+PostgreSQL library for Brest.
 
 ## 1. Usage
 
@@ -39,7 +39,7 @@ When you will require additional functionality, you can extend basic _Table_ and
 ### 1.4 Default methods
 #### 1.4.1 Table.row(filters, callback)
 
-Request a single row from the database. If a single value is passed as _filters_ parameter, it is treated as 
+Request a single row from the database. If a single value is passed as _filters_ parameter, it is treated as
 filter by first primary field, so if the primary key covers more than one column you might want to pass them as an object.
 
 Request is automatically limited to one row, which is passed to callback as an object. If no records in the table match the
@@ -51,7 +51,7 @@ You can also use **$allowEmpty:true** filter directive to suppress error on empt
 
 #### 1.4.2 Table.list(filters, callback)
 
-Same as Table.row, but the array of records is returned. If no records match the filtering, 
+Same as Table.row, but the array of records is returned. If no records match the filtering,
 an empty array is passed to callback.
 
 As a custom filter, you can use **$recursive** to ensure that default query will be built with recursion in mind.
@@ -62,7 +62,7 @@ Use **$distinct** filter directive to perform "SELECT DISTINCT" query.
 
 Insert new record into the table. Here, filtering is pretty much limited and used mostly to pass options.
 
-**$preprocess** filter is used to pass custom preprocessing functions to the request. 
+**$preprocess** filter is used to pass custom preprocessing functions to the request.
 
 ```javascript
 {
@@ -87,7 +87,7 @@ Update table with **data**.
 
 By default, the columns with primary keys are used to defined updated records. You can override that with
 **$update_by** filter directive. **$update_by** is an array of column names.
- 
+
  ```javascript
  {
     $update_by: ['username', 'gender']
@@ -96,7 +96,7 @@ By default, the columns with primary keys are used to defined updated records. Y
 
 Any other appliable filter from which "WHERE" query can be built, can be used to define updated records as well.
 
-**$preprocess** works on data in the same manner it does in Table.insert. Please keep in mind, that data is first 
+**$preprocess** works on data in the same manner it does in Table.insert. Please keep in mind, that data is first
 _preprocessed_ and then passed to **$update_by**, which means, that under certain conditions, the fields you use to
 define updated records may also be preprocessed.
 
@@ -160,7 +160,7 @@ Each table is initialized with autofilters for each column:
 	}
 ```
 
-- **"%column%s"**: select rows with %column% values belong to provided array. 
+- **"%column%s"**: select rows with %column% values belong to provided array.
 If provided array is empty, this clause is treated as "false"
 
 ```javascript
@@ -177,7 +177,7 @@ If provided array is empty, this clause is treated as "false"
 		Crew.list({not_skirt_color: 'red'}, callback);
 	}
 ```
-- **"not_%column%s"**: select rows with %column% values not beloning to provided array. 
+- **"not_%column%s"**: select rows with %column% values not beloning to provided array.
 If provided array is empty, this clause is treated as "true"
 ```javascript
 	//Column is "color"
@@ -342,6 +342,10 @@ Char case is arbitrary
 
 
 ## 4 Changelist
+
+### 0.1.3
+
+- Fixed: incorrect 'DISTINCT' position
 
 ### 0.1.2
 
