@@ -199,6 +199,7 @@ class Table {
             (constraints, next) => {
                 var constraint_found = false;
                 _.each(constraints, (constraint) => {
+                    if (_.isNil(this.columns[constraint.column_name])) console.log(`[ERROR] Column ${constraint.column_name} of table ${this.name} does not exist, but there is a ${constraint.constraint_type} constraint defined`);
                     if (constraint.constraint_type == KEY_PRIMARY) {
                         this.columns[constraint.column_name].is_primary = true;
                         constraint_found = true;
