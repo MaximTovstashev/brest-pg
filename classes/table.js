@@ -293,7 +293,7 @@ class Table {
 
                 //If the queries are already defined in model class, we use them instead of default queries
                 this.queries = _.defaults(this.queries, {
-                    select: `SELECT ${this.aliasClause}*{{select}} {%distinct%} FROM "${this.name}"${aliasDefinition}{{join}} WHERE true{{where}} {{group}} {{having}} {{order}} {{limit}}`,
+                    select: `SELECT {%distinct%} ${this.aliasClause}*{{select}} FROM "${this.name}"${aliasDefinition}{{join}} WHERE true{{where}} {{group}} {{having}} {{order}} {{limit}}`,
                     insert: `INSERT INTO "${this.name}"${aliasDefinition} ({{columns}}) VALUES ({{values}}){%conflict%}{%returning%}`,
                     update: `UPDATE "${this.name}"${aliasDefinition} SET {{update}} WHERE true {{where}} {{limit}}`,
                     del: `DELETE FROM "${this.name}"${aliasDefinition} WHERE true {{where}} {%returning%}`,
