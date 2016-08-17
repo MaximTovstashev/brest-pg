@@ -343,6 +343,10 @@ Char case is arbitrary
 
 ## 4 Changelist
 
+### 0.1.5
+
+- Fixed crashing "update" when update data is empty. Now "succes" with "warning" field is returned.
+
 ### 0.1.4
 
 - filters are no longer modified within Table methods 
