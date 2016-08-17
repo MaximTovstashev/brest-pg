@@ -531,6 +531,8 @@ class Table {
         const update_by_columns = filters.$update_by || this.primary;
         const update_data = _.pick(data, _.difference(_.keys(this.columns), update_by_columns));
 
+        if (_.isEmpty(update_data)) return callback(null, {update: 'success', warning: 'Empty update object'});
+
         if (_.isArray(filters)) {
             filters.push(_.pick(data, update_by_columns));
             filters.push({update: update_data})
