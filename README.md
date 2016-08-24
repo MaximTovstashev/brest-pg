@@ -1,5 +1,5 @@
 # brest-pg
-PostgreSQL library for Brest. 
+PostgreSQL library for Brest.
 
 ## 1. Usage
 
@@ -343,13 +343,17 @@ Char case is arbitrary
 
 ## 4 Changelist
 
+### 0.1.6
+
+- Added 'data_type' to table info request
+
 ### 0.1.5
 
-- Fixed crashing "update" when update data is empty. Now "succes" with "warning" field is returned.
+- Fixed crashing "update" when update data is empty. Now "success" with "warning" field is returned.
 
 ### 0.1.4
 
-- filters are no longer modified within Table methods 
+- filters are no longer modified within Table methods
 - alias is added to "order" clause
 
 ### 0.1.3

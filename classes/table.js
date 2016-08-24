@@ -157,7 +157,7 @@ class Table {
              */
             (next) => {
                 this.db.query(`
-                                SELECT column_name, numeric_precision, is_nullable
+                                SELECT column_name, numeric_precision, is_nullable, data_type
                                 FROM information_schema.columns
                                 WHERE table_name = %L;`, this.name, next);
             },
@@ -169,14 +169,15 @@ class Table {
              */
             (columns, next) => {
                 _.each(columns, (column) => {
-                    this.columns[column.column_name] = { name: column.column_name };
+                    let name = column.column_name;
+                    this.columns[name] = { name: name, data_type: column.data_type };
                     if (column.numeric_precision) {
-                        this.numeric.add(column.column_name);
-                        this.columns[column.column_name].numeric = true;
+                        this.numeric.add(name);
+                        this.columns[name].numeric = true;
                     }
                     if (column.is_nullable == YES) {
-                        this.nullable.add(column.column_name);
-                        this.columns[column.column_name].nullable = true;
+                        this.nullable.add(name);
+                        this.columns[name].nullable = true;
                     }
                 });
                 this.db.query(`
