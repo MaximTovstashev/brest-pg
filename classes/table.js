@@ -463,7 +463,13 @@ class Table {
         }
         let filters = _.cloneDeep(_filters);
         if (!_.isFunction(callback)) throw new Error("Callback must be a function");
-        if (!_.isObject(filters)) filters = {[this.primary[0]]: filters};
+        if (!_.isObject(filters)) {
+            if (_.isNull(filters)) {
+                filters = {[`null_${this.primary[0]}`]: filters};
+            } else {
+                filters = {[this.primary[0]]: filters};
+            }
+        }
         filters.limit = [1];
 
         this.db.row(this.composeQuery(this.queries.select, filters),

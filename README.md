@@ -343,6 +343,10 @@ Char case is arbitrary
 
 ## 4 Changelist
 
+### 0.1.7
+
+- row "filters" is cast to (IS NULL %id%) instead of (%id% = NULL) when filters is null.
+
 ### 0.1.6
 
 - Added 'data_type' to table info request
