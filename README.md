@@ -343,6 +343,11 @@ Char case is arbitrary
 
 ## 4 Changelist
 
+### 0.1.8
+
+- Fixed issue with filteredQuery using default select query instead of provided
+- Fixed issue with toArray transform, crashing when non-string is provided
+
 ### 0.1.7
 
 - row "filters" is cast to (IS NULL %id%) instead of (%id% = NULL) when filters is null.

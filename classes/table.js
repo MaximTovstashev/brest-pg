@@ -447,7 +447,7 @@ class Table {
         }
         let filters = _.cloneDeep(_filters);
         query = format(query, ...params);
-        return this.db.query(this.composeQuery(this.queries.select, filters), callback);
+        return this.db.query(this.composeQuery(query, filters), callback);
     }
 
     /**
