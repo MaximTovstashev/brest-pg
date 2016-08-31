@@ -474,7 +474,7 @@ class Table {
         this.db.row(this.composeQuery(this.queries.select, filters),
             (err, result) => {
                 if (err) return callback(err);
-                if (_.isEmpty(result) && !filters.$allowEmpty) return callback({error: `No ${this.name} found for identifier(s) ${filters}`, code: httpStatus.NOT_FOUND , filters: filters});
+                if (_.isEmpty(result) && !filters.$allowEmpty) return callback({error: `No ${this.name} found with given filters`, code: httpStatus.NOT_FOUND , filters: filters});
                 callback(null, result);
             });
     };
