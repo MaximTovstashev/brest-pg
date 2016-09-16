@@ -4,7 +4,7 @@ class ReturningInjector extends BasicInjector {
 
     constructor(table) {
         super(table);
-        this.replacement = this.table.primary.length ? ` RETURNING ${this.table.aliasClause}${this.table.primary.join(`, ${this.table.aliasClause}`)}` : '';
+        this.replacement = ` RETURNING ${this.table.aliasClause}*`;
     }
 
     /**
