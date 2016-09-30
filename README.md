@@ -343,6 +343,10 @@ Char case is arbitrary
 
 ## 4 Changelist
 
+### 0.1.11
+
+- Fixed issue with 'row' request, when filter=0
+
 ### 0.1.10
 
 - Fixed issue with deep cloning empty filters.

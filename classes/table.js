@@ -462,11 +462,11 @@ class Table {
         }
         let filters = _.cloneDeep(_filters)  || {};
         if (!_.isFunction(callback)) throw new Error("Callback must be a function");
-        if (!_.isObject(filters)) {
-            if (_.isNull(filters)) {
-                filters = {[`null_${this.primary[0]}`]: filters};
+        if (!_.isObject(_filters)) {
+            if (_.isNull(_filters)) {
+                filters = {[`null_${this.primary[0]}`]: _filters};
             } else {
-                filters = {[this.primary[0]]: filters};
+                filters = {[this.primary[0]]: _filters};
             }
         }
         filters.limit = [1];
@@ -474,6 +474,7 @@ class Table {
         this.db.row(this.composeQuery(this.queries.select, filters),
             (err, result) => {
                 if (err) return callback(err);
+                if(this.name=='user' && filters.id==0) console.log(result);
                 if (_.isEmpty(result) && !filters.$allowEmpty) return callback({error: `No ${this.name} found with given filters`, code: httpStatus.NOT_FOUND , filters: filters});
                 callback(null, result);
             });
