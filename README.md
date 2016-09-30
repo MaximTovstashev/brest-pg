@@ -343,6 +343,10 @@ Char case is arbitrary
 
 ## 4 Changelist
 
+### 0.1.10
+
+- Fixed issue with deep cloning empty filters.
+
 ### 0.1.9
 
 - Table.insert now returns whole inserted object, not only {id}

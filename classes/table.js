@@ -445,7 +445,7 @@ class Table {
             callback = _filters;
             _filters = {};
         }
-        let filters = _.cloneDeep(_filters);
+        let filters = _.cloneDeep(_filters) || {};
         query = format(query, ...params);
         return this.db.query(this.composeQuery(query, filters), callback);
     }
@@ -460,7 +460,7 @@ class Table {
             callback = _filters;
             _filters = {};
         }
-        let filters = _.cloneDeep(_filters);
+        let filters = _.cloneDeep(_filters)  || {};
         if (!_.isFunction(callback)) throw new Error("Callback must be a function");
         if (!_.isObject(filters)) {
             if (_.isNull(filters)) {
@@ -489,7 +489,7 @@ class Table {
             callback = _filters;
             _filters = {};
         }
-        let filters = _.cloneDeep(_filters);
+        let filters = _.cloneDeep(_filters) || {};
         if (!_.isFunction(callback)) throw new Error("Callback must be a function");
         return this.db.query(this.composeQuery(this.queries.select, filters), callback);
     };
@@ -506,7 +506,7 @@ class Table {
             callback = _filters;
             _filters = {};
         }
-        let filters = _.cloneDeep(_filters);
+        let filters = _.cloneDeep(_filters) || {};
         const relatedData = _.pick(data, _.keys(this.columns));
         filters = _.defaults(filters, {
             columns: _.keys(relatedData),
@@ -531,7 +531,7 @@ class Table {
             callback = _filters;
             _filters = {};
         }
-        let filters = _.cloneDeep(_filters);
+        let filters = _.cloneDeep(_filters) || {};
         data = this._preprocess(data, _.concat(filters.$preprocess || [], this.$preprocess));
 
         if (_.isString(filters.$update_by)) filters.$update_by = [filters.$update_by];
@@ -566,7 +566,7 @@ class Table {
             callback = _filters;
             _filters = {};
         }
-        let filters = _.cloneDeep(_filters);
+        let filters = _.cloneDeep(_filters) || {};
 
         if (!_.isFunction(callback)) throw new Error("Callback must be a function");
         if (_.isEmpty(filters)) return callback({error: "Can't delete with empty filters"});
@@ -591,7 +591,7 @@ class Table {
             callback = _filters;
             _filters = {};
         }
-        let filters = _.cloneDeep(_filters);
+        let filters = _.cloneDeep(_filters) || {};
 
         this.db.query(this.composeQuery(this.queries.count, filters), (err, count) => {
             if (err) return callback(err);
