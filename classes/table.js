@@ -460,7 +460,7 @@ class Table {
             callback = _filters;
             _filters = {};
         }
-        let filters = _.cloneDeep(_filters)  || {};
+        let filters = _.cloneDeep(_filters) || {};
         if (!_.isFunction(callback)) throw new Error("Callback must be a function");
         if (!_.isObject(_filters)) {
             if (_.isNull(_filters)) {
@@ -474,7 +474,6 @@ class Table {
         this.db.row(this.composeQuery(this.queries.select, filters),
             (err, result) => {
                 if (err) return callback(err);
-                if(this.name=='user' && filters.id==0) console.log(result);
                 if (_.isEmpty(result) && !filters.$allowEmpty) return callback({error: `No ${this.name} found with given filters`, code: httpStatus.NOT_FOUND , filters: filters});
                 callback(null, result);
             });
@@ -490,8 +489,9 @@ class Table {
             callback = _filters;
             _filters = {};
         }
-        let filters = _.cloneDeep(_filters) || {};
-        if (!_.isFunction(callback)) throw new Error("Callback must be a function");
+        if (!_.isFunction(callback)) throw new Error('Callback must be a function');
+        if (_.isNil(_filters)) return callback({error: `Filters can't be explicitly ${typeof _filters} in ${this.name}.list`});
+        let filters = _.cloneDeep(_filters);
         return this.db.query(this.composeQuery(this.queries.select, filters), callback);
     };
 
@@ -507,8 +507,12 @@ class Table {
             callback = _filters;
             _filters = {};
         }
-        let filters = _.cloneDeep(_filters) || {};
+        if (!_.isFunction(callback)) throw new Error('Callback must be a function');
+        if (_.isNil(_filters)) return callback({error: `Filters can't be explicitly ${typeof _filters} in ${this.name}.insert`});
+        let filters = _.cloneDeep(_filters);
+
         const relatedData = _.pick(data, _.keys(this.columns));
+
         filters = _.defaults(filters, {
             columns: _.keys(relatedData),
             values: _.values(this._preprocess(relatedData, _.concat(filters.$preprocess || [], this.$preprocess)))
@@ -532,7 +536,11 @@ class Table {
             callback = _filters;
             _filters = {};
         }
-        let filters = _.cloneDeep(_filters) || {};
+
+        if (!_.isFunction(callback)) throw new Error('Callback must be a function');
+        if (_.isNil(_filters)) return callback({error: `Filters can't be explicitly ${typeof _filters} in ${this.name}.update`});
+
+        let filters = _.cloneDeep(_filters);
         data = this._preprocess(data, _.concat(filters.$preprocess || [], this.$preprocess));
 
         if (_.isString(filters.$update_by)) filters.$update_by = [filters.$update_by];
@@ -567,13 +575,17 @@ class Table {
             callback = _filters;
             _filters = {};
         }
-        let filters = _.cloneDeep(_filters) || {};
+
+        if (!_.isFunction(callback)) throw new Error('Callback must be a function');
+        if (_.isNil(_filters)) return callback({error: `Filters can't be explicitly ${typeof _filters} in ${this.name}.del`});
+
+        let filters = _.cloneDeep(_filters);
 
         if (!_.isFunction(callback)) throw new Error("Callback must be a function");
         if (_.isEmpty(filters)) return callback({error: "Can't delete with empty filters"});
-        if (!_.isObject(filters)) filters = {[this.primary[0]]: filters};
+        if (_.isNumber(filters) || _.isString(filters)) filters = {[this.primary[0]]: filters};
+        if (_.isArray(filters)) filters = {[this.primary[0]+'s']: filters};
 
-        if (_.isEmpty(filters)) callback({error: 'Deletion with empty filter must be forced', code: httpStatus.UNPROCESSABLE_ENTITY});
 
         return this.db.row(this.composeQuery(this.queries.del, filters), (err, res) => {
             if (err) return callback(err);
@@ -592,7 +604,11 @@ class Table {
             callback = _filters;
             _filters = {};
         }
-        let filters = _.cloneDeep(_filters) || {};
+
+        if (!_.isFunction(callback)) throw new Error('Callback must be a function');
+        if (_.isNil(_filters)) return callback({error: `Filters can't be explicitly ${typeof _filters} in ${this.name}.del`});
+
+        let filters = _.cloneDeep(_filters);
 
         this.db.query(this.composeQuery(this.queries.count, filters), (err, count) => {
             if (err) return callback(err);

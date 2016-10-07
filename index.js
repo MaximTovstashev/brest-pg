@@ -28,14 +28,8 @@ BrestPG.init = function(brest, callback) {
     BrestPG.db = new DB(brest.getSetting('postgres'));
     BrestPG.controllers = new Ctrl(brest);
     brest.db = BrestPG.db;
-    BrestPG.db.on('error', function(err) {callback(err)});
-    BrestPG.db.on('ready',
-        () => {
-            BrestPG.controllers.init(brest, function(err){
-                callback(err);
-            });
-        }
-    );
+    BrestPG.db.on('error', (err) => callback(err));
+    BrestPG.db.on('ready', () => BrestPG.controllers.init(brest, (err) => callback(err)));
 };
 
 BrestPG.tbl = function(table_name) {

@@ -209,7 +209,7 @@ Please, note, that null-comparison filters are generated only for nullable field
 Please, note that comparison filters are generated only for numeric fields
 
  - **limit**: limit search result. Limit filter accepts an array [limit, offset = 0],
- with optional second element. It behaves exactly as Postgres LIMIT/OFFSET
+ with optional second element. It behaves exactly like Postgres LIMIT/OFFSET
 
  - **order**: sort the result by provided column name
 
@@ -341,7 +341,75 @@ Char case is arbitrary
 ```
 
 
-## 4 Changelist
+## 4 Running tests
+
+### 4.1 Setup test environment
+
+Brest-PG requires test user and an empty test database to perform tests. The following instructions are based on default
+settings, listed in "./test/settings.js". If for some reasons you require different settings, modify settings.js file and your 
+actions to your liking.
+
+#### 4.1.1 Create test user
+
+
+```bash
+# adduser test
+# passwd test
+```
+
+#### 4.1.2 Create test database
+
+You need to login as database super user under postgresql server. Again the simplest way to connect as the postgres user is to change to the postgres unix user on the database server using su command as follows:
+```bash
+# su postgres
+$ psql
+```
+
+Output:
+```
+psql (9.5.4)
+Type "help" for help.
+
+postgres=#
+```
+
+#### 4.1.2 Create test database user
+
+```
+postgers=# CREATE USER test WITH PASSWORD 'test';
+```
+
+#### 4.1.3 Create test database
+
+```
+postgers=# CREATE DATABASE test;
+```
+
+#### 4.1.4 Assign user to database
+
+```
+postgers=# GRANT ALL PRIVILEGES ON DATABASE test TO test;
+```
+
+and quit
+
+```
+postgers=# \q
+```
+
+You can verify your actions by logging into test user:
+
+```
+$ su test
+$ psql -d test -U test
+```
+
+## 5 Changelist
+
+### 0.1.12
+
+- Empty filtering is more predictable now
+- Adding tests
 
 ### 0.1.11
 

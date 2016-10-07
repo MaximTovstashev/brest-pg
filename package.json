@@ -5,7 +5,7 @@
   },
   "description": "PostgreSQL layer with some bREST API binding",
   "name": "brest-pg",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "repository": {
     "type": "git",
     "url": " https://github.com/MaximTovstashev/brest-pg.git"
@@ -14,9 +14,18 @@
   "dependencies": {
     "async": "*",
     "lodash": "*",
-    "pg": "^6.0.3",
+    "pg": "^6.1.0",
     "pg-format": "*",
     "pg-native": "^1.10.0"
+  },
+  "devDependencies": {
+    "chai": "*",
+    "chai-spies": "*",
+    "mocha": "*",
+    "mockery": "*"
+  },
+  "scripts": {
+      "test": "mocha --full-trace"
   },
   "license": "MIT"
 }
