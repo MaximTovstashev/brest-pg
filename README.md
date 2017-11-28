@@ -79,7 +79,7 @@ Insert new record into the table. Here, filtering is pretty much limited and use
 }
 ```
 
-Callback returns the primary keys for the newly inserted row, unless **returning** is overridden in class definition.
+Callback returns the the newly inserted row, unless **returning** is overridden in class definition.
 
 #### 1.4.4 Table.update(data, filters, callback)
 
@@ -100,7 +100,7 @@ Any other appliable filter from which "WHERE" query can be built, can be used to
 _preprocessed_ and then passed to **$update_by**, which means, that under certain conditions, the fields you use to
 define updated records may also be preprocessed.
 
-#### 1.4.5 Table.delete(filters, callback)
+#### 1.4.5 Table.del(filters, callback)
 
 Delete table records.
 
@@ -406,6 +406,9 @@ $ psql -d test -U test
 
 ## 5 Changelist
 
+### 0.1.13
+- Table class now has it's own "query" method.
+
 ### 0.1.12
 
 - Empty filtering is more predictable now
@@ -461,8 +464,8 @@ $ psql -d test -U test
 
 - Table.row now accepts only two parameters: filters and callback. "filters" can be a single Number/String value
 - Table.row and Table.list now use same *Table.queries.select* query template
-- Table.delete doesn't accept empty filters unless forced
-- Table.delete doesn't accept 'limit' filter as it is not supported by PostgreSQL
+- Table.del doesn't accept empty filters unless forced
+- Table.del doesn't accept 'limit' filter as it is not supported by PostgreSQL
 - "update_by" filter is now spelled as $update_by
 - $recursive filter directive added for select queries
 - $distinct filter directive added for select queries

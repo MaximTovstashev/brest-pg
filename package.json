@@ -5,18 +5,18 @@
   },
   "description": "PostgreSQL layer with some bREST API binding",
   "name": "brest-pg",
-  "version": "0.1.12",
+  "version": "0.2.0",
   "repository": {
     "type": "git",
     "url": " https://github.com/MaximTovstashev/brest-pg.git"
   },
   "main": "index.js",
   "dependencies": {
-    "async": "*",
-    "lodash": "*",
-    "pg": "^6.1.0",
-    "pg-format": "*",
-    "pg-native": "^1.10.0"
+    "async": "^2.6.0",
+    "lodash": "^4.17.4",
+    "pg": "^7.4.0",
+    "pg-format": "^1.0.4",
+    "pg-native": "^2.2.0"
   },
   "devDependencies": {
     "chai": "*",

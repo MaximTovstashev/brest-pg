@@ -1,6 +1,7 @@
-var DB = require('./lib/db');
-var Ctrl = require('./lib/ctrl');
-var _ = require('lodash');
+const DB = require('./lib/db');
+const Ctrl = require('./lib/ctrl');
+const _ = require('lodash');
+const async = require('async');
 
 /**
  *
@@ -8,28 +9,28 @@ var _ = require('lodash');
  * @returns Table
  * @constructor
  */
-var BrestPG = {};
+const BrestPG = {};
 
 BrestPG.Table = require('./classes/table');
 BrestPG.Controller = require('./classes/controller');
-
-// BrestPG.resource = {
-//     init: function (resource, callback) {
-//         callback();
-//     }
-// };
 
 /**
  * Init extension within Brest
  * @param brest
  * @param callback
  */
-BrestPG.init = function(brest, callback) {
-    BrestPG.db = new DB(brest.getSetting('postgres'));
-    BrestPG.controllers = new Ctrl(brest);
-    brest.db = BrestPG.db;
-    BrestPG.db.on('error', (err) => callback(err));
-    BrestPG.db.on('ready', () => BrestPG.controllers.init(brest, (err) => callback(err)));
+BrestPG.before_static_init = function(brest, callback) {
+   async.waterfall([
+     next => {
+       BrestPG.db = new DB();
+       brest.db = BrestPG.db;
+       BrestPG.db.connect(brest, brest.getSetting('postgres'), next)
+     },
+     next => {
+       BrestPG.controllers = new Ctrl();
+       BrestPG.controllers.init(brest, next)
+     }
+   ], callback);
 };
 
 BrestPG.tbl = function(table_name) {

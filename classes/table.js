@@ -175,13 +175,12 @@ class Table {
                         this.numeric.add(name);
                         this.columns[name].numeric = true;
                     }
-                    if (column.is_nullable == YES) {
+                    if (column.is_nullable === YES) {
                         this.nullable.add(name);
                         this.columns[name].nullable = true;
                     }
                 });
-                this.db.query(`
-                                SELECT
+                this.db.query(` SELECT
                                     kcu.column_name, constraint_type
                                 FROM
                                     information_schema.table_constraints AS tc
@@ -198,14 +197,14 @@ class Table {
              * @param next
              */
             (constraints, next) => {
-                var constraint_found = false;
+                let constraint_found = false;
                 _.each(constraints, (constraint) => {
-                    if (constraint.constraint_type == KEY_PRIMARY) {
+                    if (constraint.constraint_type === KEY_PRIMARY) {
                         this.columns[constraint.column_name].is_primary = true;
                         constraint_found = true;
                         this.primary.push(constraint.column_name);
                     }
-                    if (constraint.constraint_type == KEY_FOREIGN) {
+                    if (constraint.constraint_type === KEY_FOREIGN) {
                         this.columns[constraint.column_name].is_foreign = true;
                         constraint_found = true;
                     }
@@ -229,7 +228,7 @@ class Table {
                         this.non_primary.push(column);
                     }
 
-                    var columnDefinition = `${this.aliasClause}${column}`;
+                    const columnDefinition = `${this.aliasClause}${column}`;
                     defaultFilters[column] = ` ${columnDefinition} = %L`;
                     defaultFilters[`${column}s`] = ` ${columnDefinition} IN (%L)`;
                     this.falseIfEmpty.add(`${column}s`);
@@ -290,7 +289,7 @@ class Table {
                 this.filtersRecursive = _.defaults(this.filtersRecursive, recursiveFilters);
                 this.filtersAPI = defaultFiltersAPI;
 
-                var aliasDefinition = this.alias ? ` AS ${this.alias}` : '';
+                const aliasDefinition = this.alias ? ` AS ${this.alias}` : '';
 
                 //If the queries are already defined in model class, we use them instead of default queries
                 this.queries = _.defaults(this.queries, {
@@ -310,7 +309,7 @@ class Table {
                 fs.readdir(injectorsPath, (err, injectors) => {
                     if (err) return next(err);
                     _.each(injectors, (injector) => {
-                        if (path.extname(injector) == JS_EXTENTION) {
+                        if (path.extname(injector) === JS_EXTENTION) {
                             const InjectorClass = require(path.join(injectorsPath, injector));
                             this.injectors[path.basename(injector, JS_EXTENTION)] = new InjectorClass(this);
                         }
@@ -347,7 +346,7 @@ class Table {
         if (_.isArray(filters)) return _.map(filters, Table.unfoldFilters);
 
         _.each(filters, function(value, key) {
-            if (NON_FOLDABLE_FILTERS.indexOf(key) == -1 && _.isObject(value) && !_.isArray(value)) {
+            if (NON_FOLDABLE_FILTERS.indexOf(key) === -1 && _.isObject(value) && !_.isArray(value)) {
                 _.each(value, function(folded_value, folded_key){
                     if (FOLDED_CLAUSES[folded_key]) {
                         filters[_f(FOLDED_CLAUSES[folded_key], key)] = folded_value;
@@ -372,7 +371,7 @@ class Table {
             const normalizedInjections = {};
             _.each(preNormalizedInjections, function(injectionBlock){
                  _.each(injectionBlock, function(injection, key) {
-                    if (NON_GROUPABLE_FILTERS.indexOf(key) == -1) {
+                    if (NON_GROUPABLE_FILTERS.indexOf(key) === -1) {
                         normalizedInjections[key] = _.defaults(normalizedInjections[key], injection);
                     } else {
                         if (!normalizedInjections[key]) normalizedInjections[key] = [];
@@ -474,7 +473,7 @@ class Table {
         this.db.row(this.composeQuery(this.queries.select, filters),
             (err, result) => {
                 if (err) return callback(err);
-                if (_.isEmpty(result) && !filters.$allowEmpty) return callback({error: `No ${this.name} found with given filters`, code: httpStatus.NOT_FOUND , filters: filters});
+                if (_.isEmpty(result) && !filters.$allowEmpty) return callback({error: `No ${this.name} found with given filters`, code: httpStatus.NOT_FOUND , filters});
                 callback(null, result);
             });
     };
@@ -509,9 +508,10 @@ class Table {
         }
         if (!_.isFunction(callback)) throw new Error('Callback must be a function');
         if (_.isNil(_filters)) return callback({error: `Filters can't be explicitly ${typeof _filters} in ${this.name}.insert`});
+
         let filters = _.cloneDeep(_filters);
 
-        const relatedData = _.pick(data, _.keys(this.columns));
+        const relatedData = _.pick(_.cloneDeep(data), _.keys(this.columns));
 
         filters = _.defaults(filters, {
             columns: _.keys(relatedData),
@@ -527,11 +527,11 @@ class Table {
 
     /**
      * Update
-     * @param {Object} data
+     * @param {Object} _data
      * @param {Object} [_filters]
      * @param {Function} callback
      */
-    update(data, _filters, callback) {
+    update(_data, _filters, callback) {
         if (_.isFunction(_filters)) {
             callback = _filters;
             _filters = {};
@@ -541,7 +541,8 @@ class Table {
         if (_.isNil(_filters)) return callback({error: `Filters can't be explicitly ${typeof _filters} in ${this.name}.update`});
 
         let filters = _.cloneDeep(_filters);
-        data = this._preprocess(data, _.concat(filters.$preprocess || [], this.$preprocess));
+        const raw_data = _.cloneDeep(_data);
+        const data = this._preprocess(raw_data, _.concat(filters.$preprocess || [], this.$preprocess));
 
         if (_.isString(filters.$update_by)) filters.$update_by = [filters.$update_by];
         const update_by_columns = filters.$update_by || this.primary;
@@ -765,6 +766,10 @@ class Table {
 
     persistentUpdateCallback(err) {
         if (err) console.log('\nERROR: persistent fields update failed for ', this.name, 'with error:\n' + err);
+    };
+
+    query(query, params, callback) {
+        this.db.query(query, params, callback);
     }
 
 }
